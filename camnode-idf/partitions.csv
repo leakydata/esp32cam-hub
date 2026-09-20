@@ -1,0 +1,9 @@
+# 4MB flash. Two equal OTA slots and no factory partition: every image is an OTA image,
+# so a failed update rolls back to the slot that was working. No SPIFFS -- nothing in
+# this firmware uses a flash filesystem; footage lives on the SD card.
+# Name,     Type, SubType, Offset,   Size
+nvs,        data, nvs,     0x9000,   0x5000
+otadata,    data, ota,     0xe000,   0x2000
+phy_init,   data, phy,     0x10000,  0x1000
+ota_0,      app,  ota_0,   0x20000,  0x1E0000
+ota_1,      app,  ota_1,   0x200000, 0x1E0000

@@ -1,0 +1,61 @@
+CONFIG_IDF_TARGET="esp32"
+
+# 4MB flash, two 1.875MB OTA slots (see partitions.csv)
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+# Roll back to the previous slot if a new image never reaches app_main and finishes
+# starting up. The app confirms itself with esp_ota_mark_app_valid_cancel_rollback()
+# once WiFi is up and the servers are listening, so a bad OTA cannot strand a camera
+# somewhere out of reach. Not available on the prebuilt Arduino core.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# PSRAM: the frame buffers, the pre-roll ring and the AVI index all live here
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_QUAD=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+
+# exFAT + long names: this is the reason for the port. The prebuilt Arduino core
+# compiles FatFs with exFAT off, which caps SD cards at 32GB FAT32.
+CONFIG_FATFS_LFN_HEAP=y
+CONFIG_FATFS_MAX_LFN=255
+CONFIG_FATFS_API_ENCODING_UTF_8=y
+CONFIG_FATFS_CODEPAGE_437=y
+CONFIG_FATFS_FS_EXFAT=y
+CONFIG_FATFS_SECTOR_512=y
+
+# HTTP: three servers (80 api, 81 stream, 82 files) and long MJPEG responses
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+CONFIG_HTTPD_MAX_URI_LEN=512
+CONFIG_LWIP_MAX_SOCKETS=16
+
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP32_DEFAULT_CPU_FREQ_240=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# brownout at the default level trips on camera TX bursts with weak USB power
+CONFIG_ESP_BROWNOUT_DET_LVL_SEL_7=y
+
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
+# ---- performance knobs the prebuilt Arduino core does not expose ----
+
+# Flash at 80MHz. The Arduino build already ran these modules at DIO/80m, so it is
+# proven on this hardware; IDF's 40MHz default halves instruction fetch on a cache miss.
+# Mode stays DIO: QIO would need the module's flash IO2/IO3 wired for it, and the
+# Arduino build never used it here, so there is no evidence it is safe on these boards.
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+
+# MJPEG streaming is one big unidirectional TCP flow per viewer. The stock 5760-byte
+# window caps a single stream well below what the radio can carry; 32KB lets a frame
+# go out without stalling on ACKs. Buffers can live in PSRAM (SPIRAM_TRY_ALLOCATE_WIFI_LWIP).
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=32768
+CONFIG_LWIP_TCP_WND_DEFAULT=32768
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=16
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=24
+CONFIG_ESP_WIFI_TX_BA_WIN=12

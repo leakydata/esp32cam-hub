@@ -1,0 +1,1169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Camera Hub</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #181b22; --panel2: #1f232c; --line: #2a2f3a; --text: #e6e8ec;
+    --muted: #8b919c; --ok: #3ecf8e; --warn: #f5a524; --bad: #e5484d; --accent: #4f8cff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center;
+           padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel);
+           position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; }
+  h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  .count { color: var(--muted); }
+  .spacer { flex: 1; }
+  input, button, select { font: inherit; color: var(--text); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; }
+  button { cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger:hover:not(:disabled) { border-color: var(--bad); color: var(--bad); }
+  button.attn { border-color: var(--warn); color: var(--warn); }
+  label.chk { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); cursor: pointer; }
+  .pill { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; font-size: 11px;
+          background: var(--panel2); color: var(--muted); text-align: center; margin-left: 4px; }
+  .pill.hot { background: var(--warn); color: #000; }
+  main { padding: 16px; display: grid; gap: 16px;
+         grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--tile, 420px)), 1fr)); }
+
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .tile.hiddencam { opacity: .45; }
+  .tile.moving { border-color: var(--warn); box-shadow: 0 0 0 1px var(--warn); }
+  .view { position: relative; aspect-ratio: 4 / 3; background: #000; overflow: hidden; cursor: zoom-in; }
+  .view img { position: absolute; top: 50%; left: 50%; width: 100%; height: 100%;
+              object-fit: contain; transform: translate(-50%, -50%) rotate(var(--rot, 0deg)); }
+  .view.sideways img { width: 75%; height: 133.34%; }
+  .view .msg { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted);
+               background: rgba(0,0,0,.55); text-align: center; padding: 12px; }
+  .view .clock { position: absolute; right: 8px; bottom: 6px; font: 12px ui-monospace, monospace;
+                 color: #fff; text-shadow: 0 0 3px #000, 0 0 3px #000; pointer-events: none; }
+  .badges { position: absolute; left: 8px; top: 6px; display: flex; gap: 4px; pointer-events: none; }
+  .badge { font: 600 11px system-ui, sans-serif; color: #fff; padding: 1px 6px; border-radius: 4px; }
+  .badge.rec { background: rgba(229,72,77,.85); }
+  .badge.mot { background: rgba(245,165,36,.9); color: #000; }
+  .badge.tl { background: rgba(79,140,255,.85); }
+  .badge.nosd { background: rgba(0,0,0,.7); color: var(--warn); border: 1px solid var(--warn); }
+  .bar { display: flex; align-items: center; gap: 8px; padding: 7px 10px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); flex: none; }
+  .dot.on { background: var(--ok); } .dot.stale { background: var(--warn); }
+  .name { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .meta { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .icon { padding: 2px 7px; font-size: 13px; line-height: 1.2; }
+  .sig { display: inline-flex; gap: 1px; align-items: flex-end; height: 11px; }
+  .sig i { width: 3px; background: var(--line); border-radius: 1px; }
+  .sig i.on { background: var(--text); }
+  .empty { grid-column: 1 / -1; text-align: center; color: var(--muted); padding: 60px 16px; }
+
+  /* single-camera fullscreen */
+  .full { position: fixed; inset: 0; background: #000; z-index: 20; display: flex; flex-direction: column; }
+  .full .view { flex: 1; aspect-ratio: auto; cursor: default; }
+  .full .bar { background: var(--panel); flex-wrap: wrap; padding-bottom: calc(7px + env(safe-area-inset-bottom, 0px)); }
+
+  /* wall mode */
+  body.wall header, body.wall .tile .bar { display: none; }
+  body.wall main { padding: 0; gap: 2px; min-height: 100vh; align-content: center; background: #000;
+                   grid-template-columns: repeat(var(--wallcols, 2), 1fr); }
+  body.wall .tile { border: 0; border-radius: 0; }
+  body.wall .tile.hiddencam { display: none; }
+
+  /* settings drawer */
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(400px, 100vw); z-index: 30;
+            background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto;
+            padding: calc(14px + env(safe-area-inset-top, 0px)) 16px calc(24px + env(safe-area-inset-bottom, 0px));
+            box-shadow: -8px 0 24px rgba(0,0,0,.4); }
+  .drawer h2 { font-size: 15px; margin: 0 0 2px; }
+  .drawer h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+               margin: 22px 0 8px; font-weight: 600; }
+  .row { display: grid; grid-template-columns: 110px 1fr 40px; align-items: center; gap: 8px; margin: 7px 0; }
+  .row > span:first-child { color: var(--muted); }
+  .row output { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .row select, .row input[type=text] { grid-column: 2 / 4; width: 100%; }
+  .row input[type=range] { width: 100%; accent-color: var(--accent); }
+  .btns { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .info { display: grid; grid-template-columns: 110px 1fr; gap: 3px 8px; font-size: 13px; }
+  .info span:nth-child(odd) { color: var(--muted); }
+  .info span:nth-child(even) { overflow-wrap: anywhere; }
+  .note { color: var(--muted); font-size: 13px; margin: 4px 0 8px; }
+  .note.warn { color: var(--warn); }
+  .meter { height: 6px; background: var(--panel2); border-radius: 3px; overflow: hidden; flex: 1; }
+  .meter i { display: block; height: 100%; width: 0; background: var(--muted); transition: width .3s; }
+  .meter.on i { background: var(--warn); }
+  .toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%);
+           background: var(--panel2); border: 1px solid var(--line); padding: 8px 14px; border-radius: 8px; z-index: 60;
+           max-width: calc(100vw - 32px); }
+
+  /* modals */
+  .modal { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,.6); display: grid; place-items: center;
+           padding: calc(16px + env(safe-area-inset-top, 0px)) 16px calc(16px + env(safe-area-inset-bottom, 0px)); }
+  .sheet { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; width: min(1080px, 100%);
+           max-height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+  .sheet > header { position: static; }
+  .split { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(250px, 1fr); min-height: 0; flex: 1; }
+  @media (max-width: 760px) { .split { grid-template-columns: 1fr; overflow-y: auto; } }
+  .player { background: #000; display: flex; flex-direction: column; min-height: 0; }
+  .player .view { flex: 1; aspect-ratio: 4 / 3; cursor: default; }
+  .player video { width: 100%; aspect-ratio: 4 / 3; background: #000; display: block; }
+  .player .bar { background: var(--panel2); flex-wrap: wrap; }
+  .side { overflow-y: auto; border-left: 1px solid var(--line); min-height: 220px; }
+  .side h4 { margin: 0; padding: 8px 12px 4px; font-size: 12px; color: var(--muted); font-weight: 600;
+             position: sticky; top: 0; background: var(--panel); display: flex; gap: 6px; align-items: center; z-index: 1; }
+  .side h4 span { flex: 1; }
+  .item { display: flex; align-items: center; gap: 8px; padding: 6px 12px; cursor: pointer; }
+  .item:hover { background: var(--panel2); }
+  .item.sel { background: var(--panel2); box-shadow: inset 3px 0 var(--accent); }
+  .item .t { flex: 1; font-variant-numeric: tabular-nums; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .tag { font-size: 11px; padding: 0 5px; border-radius: 4px; }
+  .tag.mot { background: rgba(245,165,36,.2); color: var(--warn); }
+  .tag.live { color: var(--bad); }
+  .scrub { width: 100%; accent-color: var(--accent); }
+  .pad { padding: 10px 12px; }
+  .job { font-size: 13px; padding: 4px 12px; color: var(--muted); }
+  .job progress { width: 100%; }
+
+  /* events */
+  .events { display: grid; gap: 10px; padding: 12px; overflow-y: auto;
+            grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+  .ev { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; cursor: pointer; }
+  .ev:hover { border-color: var(--accent); }
+  .ev img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block; background: #000; }
+  .ev div { padding: 5px 8px; font-size: 12px; }
+  .ev b { display: block; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lightbox { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.9); display: grid; place-items: center; cursor: zoom-out; }
+  .lightbox img { max-width: 100%; max-height: 100%; }
+
+  /* zone editor */
+  .zwrap { position: relative; background: #000; align-self: center; width: min(100%, calc((100vh - 200px) * 4 / 3)); }
+  .zwrap img { width: 100%; display: block; aspect-ratio: 4 / 3; object-fit: fill; }
+  .zwrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+  pre.log { margin: 0; padding: 10px 12px; font: 12px ui-monospace, monospace; background: #0b0d10; color: #cfd3da;
+            max-height: 240px; overflow: auto; white-space: pre-wrap; }
+  table.fw { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.fw td, table.fw th { text-align: left; padding: 5px 12px; border-bottom: 1px solid var(--line); }
+  table.fw th { color: var(--muted); font-weight: 600; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Camera Hub</h1>
+  <span class="count" id="count"></span>
+  <span class="spacer"></span>
+  <button id="fwBtn" title="Camera firmware">Firmware</button>
+  <button id="eventsBtn">Motion events<span class="pill" id="evCount">0</span></button>
+  <label class="meta">Tiles
+    <select id="size">
+      <option value="300px">Small</option>
+      <option value="420px">Medium</option>
+      <option value="640px">Large</option>
+    </select>
+  </label>
+  <label class="chk"><input type="checkbox" id="showHidden"> Show hidden</label>
+  <button id="wallBtn" title="All cameras full screen (Esc to exit)">Wall view</button>
+  <form id="addForm" style="display:flex;gap:6px">
+    <input id="addHost" placeholder="Add camera by IP" size="15">
+    <button>Add</button>
+  </form>
+</header>
+<main id="grid"></main>
+
+<div class="full" id="full" hidden>
+  <div class="view" id="fullView"><img id="fullImg" alt=""><div class="clock"></div><div class="badges"></div></div>
+  <div class="bar">
+    <span class="dot" id="fullDot"></span>
+    <span class="name" id="fullName"></span>
+    <span class="meta" id="fullMeta"></span>
+    <button id="fullSnap">Snapshot</button>
+    <button id="fullSettings">Settings</button>
+    <button id="fullClose">Close</button>
+  </div>
+</div>
+
+<!-- ============ settings drawer ============ -->
+<aside class="drawer" id="drawer" hidden>
+  <div style="display:flex;align-items:start;gap:8px">
+    <div style="flex:1;min-width:0">
+      <h2 id="dTitle"></h2>
+      <div class="meta" id="dSub"></div>
+    </div>
+    <button id="dClose">✕</button>
+  </div>
+
+  <h3>Name</h3>
+  <div class="row"><span>Display name</span><input type="text" id="dLabel" maxlength="32" placeholder="e.g. Front door"></div>
+
+  <div id="dNeedsUpdate" class="note warn" hidden>This camera's firmware is older than the hub's — some settings below are unavailable. Use <b>Firmware</b> at the top to update it.</div>
+
+  <h3>Motion detection</h3>
+  <div data-feature="md">
+    <div class="btns">
+      <label class="chk"><input type="checkbox" data-k="md"> Detect motion</label>
+      <span class="meter" id="dMeter"><i></i></span><span class="meta" id="dMotion"></span>
+    </div>
+    <div class="row"><span>Sensitivity</span><input type="range" data-k="md_sens" min="1" max="10"><output></output></div>
+    <div class="row"><span>Motion ends after</span>
+      <select data-k="md_hold">
+        <option value="3">3 s of stillness</option><option value="5">5 s of stillness</option>
+        <option value="10">10 s of stillness</option><option value="20">20 s of stillness</option>
+        <option value="30">30 s of stillness</option><option value="60">1 min of stillness</option>
+      </select></div>
+    <div class="btns"><button id="dZones">Detection zones…</button><span class="meta" id="dZoneInfo"></span></div>
+  </div>
+
+  <h3>Recording to SD card</h3>
+  <div class="note" id="dSd"></div>
+  <div data-feature="rec">
+    <div class="row"><span>Record</span>
+      <select data-k="rec" id="dRecMode">
+        <option value="0">Off</option>
+        <option value="1">Continuously (loop)</option>
+        <option value="2">Only when there's motion</option>
+      </select></div>
+    <div class="row" id="dPreRow"><span>Pre-record</span><input type="range" data-k="pre_sec" min="0" max="5"><output></output></div>
+    <div class="row"><span>Record fps</span><input type="range" data-k="rec_fps" min="1" max="25"><output></output></div>
+    <div class="row"><span>Max clip length</span>
+      <select data-k="rec_min">
+        <option value="1">1 minute</option><option value="2">2 minutes</option><option value="5">5 minutes</option>
+        <option value="10">10 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option>
+      </select></div>
+    <div class="btns"><button id="dRecs">Browse recordings</button></div>
+  </div>
+
+  <h3>Time-lapse</h3>
+  <div data-feature="tl">
+    <div class="btns">
+      <label class="chk"><input type="checkbox" data-k="tl" id="dTl"> Take time-lapse photos</label>
+    </div>
+    <div class="row"><span>One photo every</span>
+      <select data-k="tl_sec" id="dTlSec">
+        <option value="1">1 second</option><option value="2">2 seconds</option><option value="5">5 seconds</option>
+        <option value="10">10 seconds</option><option value="15">15 seconds</option><option value="30">30 seconds</option>
+        <option value="60">1 minute</option><option value="120">2 minutes</option><option value="300">5 minutes</option>
+        <option value="600">10 minutes</option><option value="900">15 minutes</option><option value="1800">30 minutes</option>
+        <option value="3600">1 hour</option>
+      </select></div>
+    <div class="note" id="dTlInfo"></div>
+    <div class="btns"><button id="dTlBrowse">Browse time-lapse</button></div>
+  </div>
+
+  <h3>Picture</h3>
+  <div class="row"><span>Resolution</span>
+    <select data-k="framesize">
+      <option value="6">QVGA 320x240</option><option value="8">CIF 400x296</option>
+      <option value="9">HVGA 480x320</option><option value="10">VGA 640x480</option>
+      <option value="11">SVGA 800x600</option><option value="12">XGA 1024x768</option>
+      <option value="13">HD 1280x720</option><option value="14">SXGA 1280x1024</option>
+      <option value="15">UXGA 1600x1200</option>
+    </select></div>
+  <div class="row"><span>Quality</span><input type="range" data-k="quality" min="4" max="40" step="1" data-invert><output></output></div>
+  <div class="row"><span>Brightness</span><input type="range" data-k="brightness" min="-2" max="2"><output></output></div>
+  <div class="row"><span>Contrast</span><input type="range" data-k="contrast" min="-2" max="2"><output></output></div>
+  <div class="row"><span>Saturation</span><input type="range" data-k="saturation" min="-2" max="2"><output></output></div>
+  <div class="row"><span>Exposure</span><input type="range" data-k="ae_level" min="-2" max="2"><output></output></div>
+  <div class="row"><span>Night boost</span>
+    <select data-k="gainceiling">
+      <option value="0">Off (2x)</option><option value="1">4x</option><option value="2">8x</option>
+      <option value="3">16x</option><option value="4">32x</option><option value="5">64x</option><option value="6">Max (128x)</option>
+    </select></div>
+  <div class="row"><span>White balance</span>
+    <select data-k="wb_mode">
+      <option value="0">Auto</option><option value="1">Sunny</option><option value="2">Cloudy</option>
+      <option value="3">Office</option><option value="4">Home</option>
+    </select></div>
+  <div class="row" data-feature="flicker"><span>Light flicker</span>
+    <select data-k="flicker">
+      <option value="0">Don't compensate</option><option value="1">50 Hz mains (Europe, Asia…)</option>
+      <option value="2">60 Hz mains (Americas)</option>
+    </select></div>
+  <div class="row"><span>Effect</span>
+    <select data-k="effect">
+      <option value="0">None</option><option value="2">Black &amp; white</option><option value="1">Negative</option>
+      <option value="3">Red tint</option><option value="4">Green tint</option><option value="5">Blue tint</option><option value="6">Sepia</option>
+    </select></div>
+  <div class="note">Picture settings apply to the live view, recordings, time-lapse and snapshots alike.</div>
+
+  <h3>Orientation</h3>
+  <div class="row"><span>Rotate view</span>
+    <select id="dRot"><option value="0">0°</option><option value="90">90°</option><option value="180">180°</option><option value="270">270°</option></select></div>
+  <div class="btns">
+    <label class="chk"><input type="checkbox" data-k="vflip"> Flip vertical</label>
+    <label class="chk"><input type="checkbox" data-k="hmirror"> Mirror</label>
+  </div>
+  <div class="note">Rotate only turns the picture on screen. Flip and Mirror change the saved footage too.</div>
+
+  <h3>Light</h3>
+  <div class="row"><span>Flash LED</span><input type="range" data-k="led" min="0" max="255" step="5"><output></output></div>
+
+  <h3>Hub</h3>
+  <div class="btns">
+    <label class="chk"><input type="checkbox" id="dHidden"> Hide from grid</label>
+  </div>
+
+  <h3>Info</h3>
+  <div class="info" id="dInfo"></div>
+
+  <h3>Actions</h3>
+  <div class="btns">
+    <button id="dSnap">Snapshot</button>
+    <button id="dOpen">Open camera page</button>
+    <button id="dReboot" class="danger">Reboot</button>
+    <button id="dReset" class="danger">Reset settings</button>
+    <button id="dRemove" class="danger" hidden>Remove</button>
+  </div>
+</aside>
+
+<!-- ============ recordings ============ -->
+<div class="modal" id="recModal" hidden>
+  <div class="sheet">
+    <header>
+      <h1 id="recTitle">Recordings</h1>
+      <span class="count" id="recCount"></span>
+      <span class="spacer"></span>
+      <label class="chk"><input type="checkbox" id="recMotionOnly"> Motion only</label>
+      <button id="recRefresh">Refresh</button>
+      <button id="recClose">Close</button>
+    </header>
+    <div class="split">
+      <div class="player">
+        <div class="view"><img id="recImg" alt=""><div class="msg" id="recMsg">Pick a clip to play</div></div>
+        <div class="bar">
+          <span class="name" id="recName"></span>
+          <label class="meta">Speed
+            <select id="recSpeed"><option value="0.5">0.5×</option><option value="1" selected>1×</option>
+              <option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select></label>
+          <button id="recDl" disabled>Download</button>
+          <button id="recDel" class="danger" disabled>Delete</button>
+        </div>
+      </div>
+      <div class="side" id="clipList"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ time-lapse ============ -->
+<div class="modal" id="tlModal" hidden>
+  <div class="sheet">
+    <header>
+      <h1 id="tlTitle">Time-lapse</h1>
+      <span class="count" id="tlCount"></span>
+      <span class="spacer"></span>
+      <button id="tlRefresh">Refresh</button>
+      <button id="tlClose">Close</button>
+    </header>
+    <div class="split">
+      <div class="player">
+        <div class="view" id="tlView"><img id="tlImg" alt=""><div class="msg" id="tlMsg">Pick an hour on the right</div></div>
+        <video id="tlVideo" controls playsinline hidden></video>
+        <div class="bar">
+          <button id="tlPlay" disabled>▶ Play</button>
+          <input type="range" class="scrub" id="tlScrub" min="0" max="0" value="0" disabled style="flex:1;min-width:120px">
+          <span class="meta" id="tlFrameInfo"></span>
+        </div>
+        <div class="bar">
+          <span class="name" id="tlSelName"></span>
+          <label class="meta">Video fps
+            <select id="tlFps"><option>10</option><option>24</option><option selected>30</option><option>60</option></select></label>
+          <button id="tlMakeHour" disabled>Make video of hour</button>
+          <button id="tlMakeDay" disabled>Make video of day</button>
+          <button id="tlDelete" class="danger" disabled>Delete</button>
+        </div>
+      </div>
+      <div class="side">
+        <div id="tlDays"></div>
+        <h4><span>Videos (saved on this PC)</span></h4>
+        <div id="tlJobs"></div>
+        <div id="tlVideos"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ zone editor ============ -->
+<div class="modal" id="zoneModal" hidden>
+  <div class="sheet" style="width:min(900px,100%)">
+    <header>
+      <h1 id="zTitle">Detection zones</h1>
+      <span class="spacer"></span>
+      <button id="zAll">Watch all</button>
+      <button id="zNone">Ignore all</button>
+      <button id="zInvert">Invert</button>
+      <button id="zCancel">Cancel</button>
+      <button id="zSave" class="primary">Save</button>
+    </header>
+    <div class="pad" style="display:flex;flex-direction:column;gap:8px;overflow:auto">
+      <div class="zwrap"><img id="zImg" alt=""><canvas id="zCan"></canvas></div>
+      <div class="note">Click or drag to switch areas on and off. <b>Dark</b> areas are ignored.
+        <span style="color:var(--bad)">Red</span> shows movement being detected right now. Mask out lamps, windows,
+        trees and roads that cause false alarms. (Shown without rotation.)</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ events ============ -->
+<div class="modal" id="evModal" hidden>
+  <div class="sheet">
+    <header>
+      <h1>Motion events</h1>
+      <span class="count" id="evSummary"></span>
+      <span class="spacer"></span>
+      <select id="evCam"><option value="">All cameras</option></select>
+      <label class="chk" title="Pop-up notifications on this PC"><input type="checkbox" id="evNotify"> Desktop notifications</label>
+      <button id="evTest">Test</button>
+      <button id="evClear" class="danger">Clear all</button>
+      <button id="evClose">Close</button>
+    </header>
+    <div class="events" id="evList"></div>
+  </div>
+</div>
+<div class="lightbox" id="lightbox" hidden><img id="lightImg" alt=""></div>
+
+<!-- ============ firmware ============ -->
+<div class="modal" id="fwModal" hidden>
+  <div class="sheet" style="width:min(760px,100%)">
+    <header>
+      <h1>Camera firmware</h1>
+      <span class="count" id="fwSource"></span>
+      <span class="spacer"></span>
+      <button id="fwUpdate" class="primary">Update cameras</button>
+      <button id="fwAll" title="Rebuild and reinstall on every camera, even up-to-date ones">Reinstall all</button>
+      <button id="fwClose">Close</button>
+    </header>
+    <div style="overflow:auto">
+      <div class="note pad" style="margin:0">Updates are sent over WiFi — no cables or buttons. Each camera reboots
+        (about 15 seconds) and any clip being recorded is closed cleanly first.</div>
+      <table class="fw"><thead><tr><th>Camera</th><th>Address</th><th>Firmware</th><th></th></tr></thead><tbody id="fwTable"></tbody></table>
+      <pre class="log" id="fwLog" hidden></pre>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const grid = $('#grid');
+const tiles = new Map();
+let cams = [], fullId = null, drawerId = null, toastTimer, fwInfo = null;
+
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('camhub.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('camhub.' + k, JSON.stringify(v)); } catch {} },
+};
+const enc = encodeURIComponent;
+const api = (path, opts) => fetch(path, opts).then(async r => {
+  if (!r.ok) throw new Error((await r.text()) || r.status);
+  return r.json();
+});
+const post = (path, body) => api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+const cam = id => cams.find(c => c.id === id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function toast(msg, ms = 2800) {
+  const t = $('#toast'); t.textContent = msg; t.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, ms);
+}
+function fmtUptime(s) {
+  const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+  return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m ${s % 60}s`;
+}
+const fmtSize = b => b > 1073741824 ? (b / 1073741824).toFixed(1) + ' GB' : b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.round(b / 1024) + ' KB';
+const fmtTime = t => new Date(t * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+const fmtDur = s => s < 60 ? `${Math.max(1, Math.round(s))} s` : `${Math.floor(s / 60)} min ${Math.round(s % 60)} s`;
+function fmtInterval(s) { return s < 60 ? `${s} s` : s < 3600 ? `${s / 60} min` : `${s / 3600} h`; }
+function dayLabel(day) {
+  if (day === '00000000') return 'Unknown date (clock not set)';
+  const d = new Date(+day.slice(0, 4), +day.slice(4, 6) - 1, +day.slice(6, 8));
+  return d.toLocaleDateString([], { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+}
+function bars(rssi) {
+  const n = rssi == null ? 0 : rssi > -55 ? 4 : rssi > -65 ? 3 : rssi > -75 ? 2 : rssi > -85 ? 1 : 0;
+  return `<span class="sig" title="${rssi ?? '?'} dBm">${[4, 6, 8, 11].map((h, i) =>
+    `<i style="height:${h}px" class="${i < n ? 'on' : ''}"></i>`).join('')}</span>`;
+}
+function setRotation(view, deg) {
+  view.style.setProperty('--rot', deg + 'deg');
+  view.classList.toggle('sideways', deg === 90 || deg === 270);
+}
+const streamSrc = id => `/cam/${enc(id)}/stream`;
+const snapshot = id => { location.href = `/cam/${enc(id)}/snapshot.jpg?download=1`; };
+const needsSd = st => (st.rec > 0 || st.tl > 0) && st.sd === 0;
+function badgesHtml(c) {
+  const st = c.status || {}, b = [];
+  if (!c.online) return '';
+  if (c.motion?.active) b.push('<span class="badge mot">MOTION</span>');
+  if (st.recording) b.push('<span class="badge rec">● REC</span>');
+  if (st.tl && st.sd) b.push('<span class="badge tl">TIME-LAPSE</span>');
+  if (needsSd(st)) b.push('<span class="badge nosd" title="Recording or time-lapse is on, but there is no SD card">NO SD CARD</span>');
+  return b.join('');
+}
+
+// ---- preferences ----
+$('#size').value = store.get('tile', '420px');
+const applySize = () => document.documentElement.style.setProperty('--tile', $('#size').value);
+applySize();
+$('#size').onchange = () => { applySize(); store.set('tile', $('#size').value); };
+$('#showHidden').checked = store.get('showHidden', false);
+$('#showHidden').onchange = () => { store.set('showHidden', $('#showHidden').checked); render(); };
+
+// ================= grid =================
+function makeTile(c) {
+  const el = document.createElement('div');
+  el.className = 'tile';
+  el.innerHTML = `<div class="view"><img alt=""><div class="clock"></div><div class="badges"></div><div class="msg">Connecting…</div></div>
+    <div class="bar"><span class="dot"></span><span class="name"></span><span class="sigwrap"></span>
+      <span class="meta"></span>
+      <button class="icon snap" title="Download snapshot">⤓</button>
+      <button class="icon gear" title="Settings">⚙</button></div>`;
+  el.querySelector('.view').onclick = () => document.body.classList.contains('wall') ? exitWall() : openFull(c.id);
+  el.querySelector('.snap').onclick = () => snapshot(c.id);
+  el.querySelector('.gear').onclick = () => openDrawer(c.id);
+  const img = el.querySelector('img');
+  img.src = streamSrc(c.id);
+  img.onerror = () => setTimeout(() => img.src = streamSrc(c.id) + '?t=' + Date.now(), 3000);
+  return el;
+}
+
+function render() {
+  const showHidden = $('#showHidden').checked;
+  const visible = cams.filter(c => showHidden || !c.hidden);
+  const online = cams.filter(c => c.online).length;
+  $('#count').textContent = `${online} of ${cams.length} online` +
+    (cams.some(c => c.hidden) && !showHidden ? ` · ${cams.filter(c => c.hidden).length} hidden` : '');
+  document.documentElement.style.setProperty('--wallcols', Math.ceil(Math.sqrt(Math.max(1, cams.filter(c => !c.hidden).length))));
+
+  const seen = new Set();
+  for (const c of visible) {
+    seen.add(c.id);
+    let el = tiles.get(c.id);
+    if (!el) { el = makeTile(c); tiles.set(c.id, el); }
+    grid.appendChild(el);
+    el.classList.toggle('hiddencam', c.hidden);
+    el.classList.toggle('moving', !!(c.online && c.motion?.active));
+    el.querySelector('.dot').className = 'dot' + (c.stale ? ' stale' : c.online ? ' on' : '');
+    el.querySelector('.name').textContent = c.name;
+    el.querySelector('.name').title = `${c.id} · ${c.host}`;
+    el.querySelector('.sigwrap').innerHTML = c.online ? bars(c.status.rssi) : '';
+    el.querySelector('.meta').textContent = c.online ? `${c.fps} fps` : 'offline';
+    el.querySelector('.badges').innerHTML = badgesHtml(c);
+    const msg = el.querySelector('.msg');
+    msg.hidden = c.online && !c.stale;
+    msg.textContent = c.stale ? 'No new frames — camera may be frozen' : 'Offline — reconnecting…';
+    setRotation(el.querySelector('.view'), c.rotation);
+  }
+  for (const [id, el] of tiles) if (!seen.has(id)) { el.remove(); tiles.delete(id); }
+
+  let empty = grid.querySelector('.empty');
+  if (!visible.length) {
+    if (!empty) { empty = document.createElement('div'); empty.className = 'empty'; grid.appendChild(empty); }
+    empty.textContent = cams.length ? 'All cameras are hidden. Tick “Show hidden” to see them.'
+      : 'Looking for cameras on the network… Power one on, or add it by IP above.';
+  } else if (empty) empty.remove();
+
+  if (fullId) updateFull();
+  if (drawerId) updateDrawer(false);
+  updateFwButton();
+}
+
+async function refresh() {
+  try { cams = await api('/api/cameras'); render(); } catch {}
+}
+
+setInterval(() => {
+  const t = new Date().toLocaleString([], { dateStyle: 'short', timeStyle: 'medium' });
+  document.querySelectorAll('.clock').forEach(e => e.textContent = t);
+}, 1000);
+
+// ================= fullscreen =================
+function openFull(id) {
+  fullId = id;
+  $('#fullImg').src = streamSrc(id);
+  $('#full').hidden = false;
+  updateFull();
+}
+function updateFull() {
+  const c = cam(fullId); if (!c) return closeFull();
+  $('#fullName').textContent = c.name;
+  $('#fullDot').className = 'dot' + (c.stale ? ' stale' : c.online ? ' on' : '');
+  $('#fullMeta').textContent = c.online ? `${c.fps} fps · ${c.host}` : 'offline';
+  $('#fullView .badges').innerHTML = badgesHtml(c);
+  setRotation($('#fullView'), c.rotation);
+}
+function closeFull() { $('#full').hidden = true; $('#fullImg').src = ''; fullId = null; }
+$('#fullClose').onclick = closeFull;
+$('#fullSnap').onclick = () => snapshot(fullId);
+$('#fullSettings').onclick = () => openDrawer(fullId);
+
+// ================= wall =================
+function exitWall() {
+  document.body.classList.remove('wall');
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+}
+$('#wallBtn').onclick = () => {
+  document.body.classList.add('wall');
+  document.documentElement.requestFullscreen?.().catch(() => {});
+};
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) document.body.classList.remove('wall'); });
+
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (!$('#lightbox').hidden) $('#lightbox').hidden = true;
+  else if (!$('#zoneModal').hidden) closeZones();
+  else if (!$('#tlModal').hidden) closeTl();
+  else if (!$('#recModal').hidden) $('#recClose').click();
+  else if (!$('#evModal').hidden) closeEvents();
+  else if (!$('#fwModal').hidden) closeFw();
+  else if (!$('#drawer').hidden) closeDrawer();
+  else if (fullId) closeFull();
+  else exitWall();
+});
+
+// ================= settings drawer =================
+function openDrawer(id) {
+  drawerId = id;
+  $('#drawer').hidden = false;
+  updateDrawer(true);
+  api(`/api/cameras/${enc(id)}/status`).then(st => { const c = cam(id); if (c) { c.status = st; updateDrawer(true); } }).catch(() => {});
+}
+function closeDrawer() { $('#drawer').hidden = true; drawerId = null; }
+$('#dClose').onclick = closeDrawer;
+
+function updateDrawer(fillControls) {
+  const c = cam(drawerId); if (!c) return closeDrawer();
+  const st = c.status || {};
+  $('#dTitle').textContent = c.name;
+  $('#dSub').textContent = `${c.id} · ${c.host}`;
+
+  // hide controls the camera's firmware doesn't have yet
+  let missing = false;
+  document.querySelectorAll('#drawer [data-feature]').forEach(el => {
+    const has = st[el.dataset.feature] !== undefined;
+    el.hidden = !has; missing ||= !has;
+  });
+  $('#dNeedsUpdate').hidden = !missing || !st.version;
+
+  if (fillControls) {
+    if (document.activeElement !== $('#dLabel')) $('#dLabel').value = st.label || '';
+    document.querySelectorAll('#drawer [data-k]').forEach(el => {
+      const v = st[el.dataset.k];
+      if (v === undefined) return;
+      if (el.type === 'checkbox') el.checked = !!v;
+      else {
+        if (el.tagName === 'SELECT' && ![...el.options].some(o => +o.value === +v)) {
+          el.add(new Option(el.id === 'dTlSec' ? fmtInterval(v) : v, v));
+        }
+        el.value = el.hasAttribute('data-invert') ? (+el.max + +el.min - v) : v;
+      }
+      showVal(el);
+    });
+    $('#dRot').value = c.rotation;
+    $('#dHidden').checked = c.hidden;
+    $('#dRemove').hidden = c.source !== 'manual';
+  }
+  $('#dPreRow').hidden = +st.rec !== 2;
+
+  // live motion meter
+  const m = c.motion || {};
+  $('#dMeter').classList.toggle('on', !!m.active);
+  $('#dMeter i').style.width = Math.min(100, (m.level || 0) * 4) + '%';
+  $('#dMotion').textContent = !st.md ? 'off' : m.active ? `motion (${m.level}%)` : `still (${m.level ?? 0}%)`;
+
+  // SD card
+  const sdNote = $('#dSd');
+  sdNote.classList.toggle('warn', needsSd(st));
+  sdNote.textContent = st.sd === undefined ? ''
+    : !st.sd ? (needsSd(st) ? '⚠ No SD card. Recording and time-lapse need a FAT32 microSD card — insert one and they start within 30 seconds.'
+                            : 'No SD card. Insert a FAT32 microSD card (32 GB High Endurance recommended) to record.')
+    : `SD card: ${(st.sd_used_mb / 1024).toFixed(1)} of ${(st.sd_total_mb / 1024).toFixed(1)} GB used` +
+      (st.recording ? ' · recording now' : '') + '. When full, the oldest footage is deleted automatically.';
+  const tlNote = $('#dTlInfo');
+  tlNote.classList.toggle('warn', !!st.tl && !st.sd);
+  tlNote.textContent = st.tl === undefined ? '' : st.tl && !st.sd ? '⚠ Time-lapse is on but there is no SD card — nothing is being saved.'
+    : st.tl ? `Saving one photo every ${fmtInterval(st.tl_sec)}` + (st.tl_frames ? ` · ${st.tl_frames} since last boot` : '') +
+              ` · about ${Math.round(86400 / st.tl_sec)} photos per day.`
+    : 'Photos are saved to the SD card; turn any hour or day into a video in the browser.';
+
+  const mb = n => n == null ? '?' : (n / 1048576).toFixed(1) + ' MB';
+  const kb = n => n == null ? '?' : Math.round(n / 1024) + ' KB';
+  const info = [
+    ['Status', c.stale ? 'Frozen' : c.online ? `Streaming ${c.fps} fps` : 'Offline'],
+    ['Viewers', c.viewers],
+    ['IP address', c.host],
+    ['WiFi', st.ssid ? `${st.ssid} (${st.rssi} dBm)` : '?'],
+    ['MAC', st.mac || '?'],
+    ['Firmware', st.version ? 'v' + st.version : '?'],
+    ['Uptime', st.uptime != null ? fmtUptime(st.uptime) : '?'],
+    ['Free memory', `${kb(st.heap)} RAM · ${mb(st.psram)} PSRAM`],
+    ['Motion events', st.motion_events != null ? `${st.motion_events} since boot` : '?'],
+    ['Found via', c.source === 'mdns' ? 'Auto-discovery' : 'Added by IP'],
+  ];
+  $('#dInfo').innerHTML = info.map(() => '<span></span><span></span>').join('');
+  [...$('#dInfo').children].forEach((el, i) => el.textContent = info[i >> 1][i & 1]);
+}
+
+function showVal(el) {
+  const out = el.parentElement.querySelector('output');
+  if (!out) return;
+  const k = el.dataset.k, v = +el.value;
+  out.textContent = k === 'led' ? Math.round(v / 2.55) + '%'
+    : k === 'pre_sec' ? v + ' s'
+    : ['quality', 'rec_fps', 'md_sens'].includes(k) ? v : (v > 0 ? '+' : '') + v;
+}
+
+async function control(params, id = drawerId) {
+  try {
+    const st = await api(`/api/cameras/${enc(id)}/control?${new URLSearchParams(params)}`);
+    const c = cam(id); if (c) c.status = st;
+    return st;
+  } catch { toast('Camera did not respond'); }
+}
+
+let debounce;
+document.querySelectorAll('#drawer [data-k]').forEach(el => {
+  const send = async () => {
+    const k = el.dataset.k;
+    const v = el.type === 'checkbox' ? (el.checked ? 1 : 0)
+      : el.hasAttribute('data-invert') ? (+el.max + +el.min - +el.value) : el.value;
+    const st = await control({ [k]: v });
+    if (!st) return;
+    if ((k === 'tl' || k === 'rec') && +v && !st.sd)
+      toast(`${k === 'tl' ? 'Time-lapse' : 'Recording'} needs an SD card. Insert a FAT32 microSD card and it will start automatically.`, 6000);
+    updateDrawer(false);
+    render();
+  };
+  if (el.type === 'range') el.oninput = () => { showVal(el); clearTimeout(debounce); debounce = setTimeout(send, 150); };
+  else el.onchange = send;
+});
+
+$('#dLabel').onchange = async () => {
+  const st = await control({ label: $('#dLabel').value.trim() });
+  if (st) { toast('Name saved on camera'); refresh(); }
+};
+$('#dRot').onchange = async () => { await post(`/api/cameras/${enc(drawerId)}/view`, { rotation: +$('#dRot').value }); refresh(); };
+$('#dHidden').onchange = async () => { await post(`/api/cameras/${enc(drawerId)}/view`, { hidden: $('#dHidden').checked }); refresh(); };
+$('#dSnap').onclick = () => snapshot(drawerId);
+$('#dOpen').onclick = () => { const c = cam(drawerId); if (c) window.open(`http://${c.host}/`, '_blank'); };
+$('#dReboot').onclick = async () => {
+  if (!confirm('Reboot this camera? It will be offline for about 15 seconds.')) return;
+  await post(`/api/cameras/${enc(drawerId)}/reboot`).catch(() => {});
+  toast('Rebooting…');
+};
+$('#dReset').onclick = async () => {
+  if (!confirm('Reset all settings, zones and the name on this camera to defaults?')) return;
+  const st = await control({ reset: 1 });
+  if (st) { toast('Settings reset'); updateDrawer(true); refresh(); }
+};
+$('#dRemove').onclick = async () => {
+  await api(`/api/cameras/${enc(drawerId)}`, { method: 'DELETE' });
+  closeDrawer(); if (fullId) closeFull(); refresh();
+};
+$('#dRecs').onclick = () => openRecordings(drawerId);
+$('#dTlBrowse').onclick = () => openTl(drawerId);
+$('#dZones').onclick = () => openZones(drawerId);
+
+$('#addForm').onsubmit = async e => {
+  e.preventDefault();
+  const host = $('#addHost').value.trim();
+  if (!host) return;
+  try { await post('/api/cameras', { host }); $('#addHost').value = ''; toast('Camera added'); }
+  catch { toast('Could not add camera'); }
+  refresh();
+};
+
+// ================= recordings =================
+let recCam = null, recClips = [], recSel = null;
+function clipInfo(path) {
+  const [, , day, file] = path.split('/');
+  const motion = file.includes('_M');
+  const stem = file.replace('.avi', '').replace('_M', '');
+  return { day: dayLabel(day), time: day === '00000000' ? stem : `${stem.slice(0, 2)}:${stem.slice(2, 4)}:${stem.slice(4, 6)}`, motion };
+}
+async function openRecordings(id) {
+  recCam = id; recSel = null;
+  $('#recTitle').textContent = `Recordings · ${cam(id)?.name || id}`;
+  $('#recModal').hidden = false;
+  stopClip();
+  await loadClips();
+}
+async function loadClips() {
+  const list = $('#clipList');
+  list.innerHTML = '<div class="note pad">Loading…</div>';
+  try { recClips = await api(`/api/cameras/${enc(recCam)}/recordings`); }
+  catch { list.innerHTML = '<div class="note pad">Could not reach the camera.</div>'; return; }
+  if (!Array.isArray(recClips)) recClips = [];
+  renderClips();
+}
+function renderClips() {
+  const list = $('#clipList');
+  const onlyMotion = $('#recMotionOnly').checked;
+  const shown = recClips.filter(c => !onlyMotion || c.path.includes('_M'));
+  const total = recClips.reduce((a, c) => a + c.size, 0);
+  $('#recCount').textContent = `${recClips.length} clips · ${fmtSize(total)}` +
+    (onlyMotion ? ` · ${shown.length} with motion` : '');
+  if (!shown.length) { list.innerHTML = `<div class="note pad">${onlyMotion ? 'No clips with motion.' : 'No recordings yet.'}</div>`; return; }
+  list.innerHTML = '';
+  let lastDay = null;
+  for (const c of shown) {
+    const { day, time, motion } = clipInfo(c.path);
+    if (day !== lastDay) { const h = document.createElement('h4'); h.innerHTML = `<span>${esc(day)}</span>`; list.appendChild(h); lastDay = day; }
+    const row = document.createElement('div');
+    row.className = 'item' + (c.path === recSel ? ' sel' : '');
+    row.dataset.path = c.path;
+    row.innerHTML = `<span class="t">${esc(time)}</span>${motion ? '<span class="tag mot">motion</span>' : ''}
+      <span class="meta">${c.active ? '<span class="tag live">● recording</span>' : fmtSize(c.size)}</span>`;
+    row.onclick = () => { if (!c.active) playClip(c.path); else toast('This clip is still being recorded'); };
+    list.appendChild(row);
+  }
+}
+$('#recMotionOnly').onchange = renderClips;
+function playClip(path) {
+  recSel = path;
+  document.querySelectorAll('#clipList .item').forEach(r => r.classList.toggle('sel', r.dataset.path === path));
+  const { day, time } = clipInfo(path);
+  $('#recName').textContent = `${day} ${time}`;
+  $('#recMsg').textContent = 'Loading clip…'; $('#recMsg').hidden = false;
+  const img = $('#recImg');
+  img.onload = () => $('#recMsg').hidden = true;
+  img.src = `/cam/${enc(recCam)}/play?path=${enc(path)}&speed=${$('#recSpeed').value}&t=${Date.now()}`;
+  setRotation(img.parentElement, cam(recCam)?.rotation || 0);
+  $('#recDl').disabled = $('#recDel').disabled = false;
+}
+function stopClip() {
+  $('#recImg').src = ''; $('#recMsg').textContent = 'Pick a clip to play'; $('#recMsg').hidden = false;
+  $('#recName').textContent = ''; $('#recDl').disabled = $('#recDel').disabled = true;
+}
+$('#recSpeed').onchange = () => recSel && playClip(recSel);
+$('#recDl').onclick = () => { if (recSel) location.href = `/cam/${enc(recCam)}/recording.avi?path=${enc(recSel)}`; };
+$('#recDel').onclick = async () => {
+  if (!recSel || !confirm('Delete this clip from the SD card?')) return;
+  const path = recSel;
+  stopClip(); recSel = null;
+  try { await api(`/api/cameras/${enc(recCam)}/recordings?path=${enc(path)}`, { method: 'DELETE' }); toast('Clip deleted'); }
+  catch { toast('Delete failed'); }
+  loadClips();
+};
+$('#recRefresh').onclick = loadClips;
+$('#recClose').onclick = () => { $('#recModal').hidden = true; stopClip(); recCam = null; };
+
+// ================= time-lapse =================
+let tlCam = null, tlDays = [], tlSel = null, tlFrames = [], tlPlaying = false, tlPollTimer = null;
+async function openTl(id) {
+  tlCam = id; tlSel = null; tlFrames = [];
+  $('#tlTitle').textContent = `Time-lapse · ${cam(id)?.name || id}`;
+  $('#tlModal').hidden = false;
+  showTlImage(); resetTlViewer();
+  loadTlDays(); loadVideos();
+  clearInterval(tlPollTimer); tlPollTimer = setInterval(loadVideos, 2000);
+}
+function closeTl() {
+  $('#tlModal').hidden = true; tlPlaying = false; tlCam = null;
+  $('#tlVideo').pause(); $('#tlVideo').removeAttribute('src');
+  clearInterval(tlPollTimer);
+}
+$('#tlClose').onclick = closeTl;
+$('#tlRefresh').onclick = () => { loadTlDays(); loadVideos(); };
+
+function resetTlViewer() {
+  $('#tlImg').src = ''; $('#tlMsg').hidden = false; $('#tlMsg').textContent = 'Pick an hour on the right';
+  $('#tlScrub').max = 0; $('#tlScrub').disabled = $('#tlPlay').disabled = true; $('#tlFrameInfo').textContent = '';
+  $('#tlSelName').textContent = '';
+  $('#tlMakeHour').disabled = $('#tlMakeDay').disabled = $('#tlDelete').disabled = true;
+}
+async function loadTlDays() {
+  const box = $('#tlDays');
+  box.innerHTML = '<div class="note pad">Loading…</div>';
+  try { tlDays = await api(`/api/cameras/${enc(tlCam)}/timelapse`); }
+  catch { box.innerHTML = '<div class="note pad">Could not reach the camera.</div>'; return; }
+  if (!Array.isArray(tlDays)) tlDays = [];
+  const total = tlDays.reduce((a, d) => a + d.hours.reduce((b, h) => b + h.count, 0), 0);
+  $('#tlCount').textContent = `${total} photos`;
+  if (!tlDays.length) {
+    const st = cam(tlCam)?.status || {};
+    box.innerHTML = `<div class="note pad">No time-lapse photos yet.${!st.tl ? ' Turn on time-lapse in the camera settings.' : !st.sd ? ' Insert an SD card.' : ''}</div>`;
+    return;
+  }
+  box.innerHTML = '';
+  for (const d of tlDays) {
+    const h4 = document.createElement('h4');
+    const n = d.hours.reduce((b, h) => b + h.count, 0);
+    h4.innerHTML = `<span>${esc(dayLabel(d.day))}</span><span class="meta" style="flex:none">${n} photos</span>`;
+    h4.style.cursor = 'pointer';
+    h4.onclick = () => selectTl(`/tl/${d.day}`);
+    h4.dataset.path = `/tl/${d.day}`;
+    box.appendChild(h4);
+    for (const h of [...d.hours].reverse()) {
+      const row = document.createElement('div');
+      const path = `/tl/${d.day}/${h.hour}`;
+      row.className = 'item' + (path === tlSel ? ' sel' : '');
+      row.dataset.path = path;
+      row.innerHTML = `<span class="t">${h.hour}:00 – ${h.hour}:59</span><span class="meta">${h.count} photos</span>`;
+      row.onclick = () => selectTl(path);
+      box.appendChild(row);
+    }
+  }
+}
+async function selectTl(path) {
+  tlSel = path; tlPlaying = false; $('#tlPlay').textContent = '▶ Play';
+  document.querySelectorAll('#tlDays [data-path]').forEach(r => r.classList.toggle('sel', r.dataset.path === path));
+  showTlImage();
+  const parts = path.split('/'), isHour = parts.length === 4;
+  $('#tlSelName').textContent = isHour ? `${dayLabel(parts[2])} ${parts[3]}:00` : dayLabel(parts[2]);
+  $('#tlMakeHour').disabled = !isHour;
+  $('#tlMakeDay').disabled = false;
+  $('#tlDelete').disabled = false;
+  $('#tlDelete').textContent = isHour ? 'Delete hour' : 'Delete day';
+  $('#tlMsg').hidden = false; $('#tlMsg').textContent = 'Loading…';
+  // frames: one hour, or every hour of the day
+  const hours = isHour ? [path] : (tlDays.find(d => d.day === parts[2])?.hours || []).map(h => `${path}/${h.hour}`);
+  tlFrames = [];
+  for (const h of hours) {
+    try { tlFrames.push(...(await api(`/api/cameras/${enc(tlCam)}/tlframes?path=${enc(h)}`)).map(f => `${h}/${f}`)); } catch {}
+    if (tlSel !== path) return;
+  }
+  if (!tlFrames.length) { $('#tlMsg').textContent = 'No photos'; return; }
+  $('#tlScrub').max = tlFrames.length - 1; $('#tlScrub').value = 0;
+  $('#tlScrub').disabled = $('#tlPlay').disabled = false;
+  showTlFrame(0);
+}
+const tlFrameUrl = p => `/cam/${enc(tlCam)}/tlframe.jpg?path=${enc(p)}`;
+function tlFrameLabel(p) {
+  const [, , day, hour, f] = p.split('/');
+  return day === '00000000' ? f : `${hour}:${f.slice(0, 2)}:${f.slice(2, 4)}`;
+}
+function showTlFrame(i) {
+  return new Promise(res => {
+    const img = $('#tlImg');
+    img.onload = () => { $('#tlMsg').hidden = true; res(); };
+    img.onerror = () => res();
+    img.src = tlFrameUrl(tlFrames[i]);
+    $('#tlFrameInfo').textContent = `${tlFrameLabel(tlFrames[i])} · ${i + 1}/${tlFrames.length}`;
+    setRotation($('#tlView'), cam(tlCam)?.rotation || 0);
+  });
+}
+$('#tlScrub').oninput = () => { tlPlaying = false; $('#tlPlay').textContent = '▶ Play'; showTlFrame(+$('#tlScrub').value); };
+$('#tlPlay').onclick = async () => {
+  tlPlaying = !tlPlaying;
+  $('#tlPlay').textContent = tlPlaying ? '❚❚ Pause' : '▶ Play';
+  const sel = tlSel;
+  while (tlPlaying && tlSel === sel) {
+    let i = +$('#tlScrub').value + 1;
+    if (i >= tlFrames.length) i = 0;
+    $('#tlScrub').value = i;
+    const t0 = performance.now();
+    await showTlFrame(i);
+    await new Promise(r => setTimeout(r, Math.max(0, 1000 / 12 - (performance.now() - t0))));
+  }
+};
+function showTlImage() { $('#tlView').hidden = false; $('#tlVideo').hidden = true; $('#tlVideo').pause(); }
+async function makeVideo(path) {
+  try {
+    await post(`/api/cameras/${enc(tlCam)}/timelapse/video`, { path, fps: +$('#tlFps').value });
+    toast('Making video — progress is shown on the right.');
+    loadVideos();
+  } catch (e) { toast('Could not start: ' + e.message); }
+}
+$('#tlMakeHour').onclick = () => tlSel && makeVideo(tlSel);
+$('#tlMakeDay').onclick = () => tlSel && makeVideo(tlSel.split('/').slice(0, 3).join('/'));
+$('#tlDelete').onclick = async () => {
+  if (!tlSel) return;
+  const what = tlSel.split('/').length === 4 ? 'this hour' : 'this whole day';
+  if (!confirm(`Delete ${what} of time-lapse photos from the SD card?`)) return;
+  try { await api(`/api/cameras/${enc(tlCam)}/timelapse?path=${enc(tlSel)}`, { method: 'DELETE' }); toast('Deleted'); }
+  catch { toast('Delete failed'); }
+  tlSel = null; resetTlViewer(); loadTlDays();
+};
+let lastVideos = '';
+async function loadVideos() {
+  let jobs = [], vids = [];
+  try { [jobs, vids] = await Promise.all([api('/api/jobs'), api('/api/videos')]); } catch { return; }
+  $('#tlJobs').innerHTML = jobs.filter(j => j.state !== 'done' || Date.now() / 1000 - j.started < 30).map(j => {
+    const name = cam(j.cam)?.name || j.cam, what = tlFrameWhat(j.path);
+    if (j.state === 'running') return `<div class="job">Making ${esc(name)} ${esc(what)}… ${j.total ? `${j.done}/${j.total} photos` : 'listing photos'}
+      <progress max="${j.total || 1}" value="${j.done}"></progress></div>`;
+    if (j.state === 'error') return `<div class="job" style="color:var(--bad)">${esc(name)} ${esc(what)}: ${esc(j.error)}</div>`;
+    return `<div class="job" style="color:var(--ok)">✓ ${esc(name)} ${esc(what)} ready</div>`;
+  }).join('');
+  const sig = JSON.stringify(vids);
+  if (sig === lastVideos) return;
+  lastVideos = sig;
+  const box = $('#tlVideos');
+  box.innerHTML = vids.length ? '' : '<div class="note pad">No videos yet. Pick an hour or day and press “Make video”.</div>';
+  for (const v of vids) {
+    const row = document.createElement('div');
+    row.className = 'item';
+    row.innerHTML = `<span class="t" title="${esc(v.name)}">${esc(v.name.replace(/_/g, ' ').replace('.mp4', ''))}</span>
+      <span class="meta">${fmtSize(v.size)}</span>
+      <button class="icon dl" title="Download">⤓</button><button class="icon danger rm" title="Delete">✕</button>`;
+    row.onclick = e => {
+      if (e.target.closest('button')) return;
+      $('#tlView').hidden = true; const vid = $('#tlVideo'); vid.hidden = false;
+      vid.src = `/videos/${enc(v.name)}`; vid.play().catch(() => {});
+    };
+    row.querySelector('.dl').onclick = () => { location.href = `/videos/${enc(v.name)}?download=1`; };
+    row.querySelector('.rm').onclick = async () => {
+      if (!confirm(`Delete ${v.name}?`)) return;
+      await api(`/api/videos/${enc(v.name)}`, { method: 'DELETE' }).catch(() => {});
+      lastVideos = ''; loadVideos();
+    };
+    box.appendChild(row);
+  }
+}
+function tlFrameWhat(path) {
+  const p = path.split('/');
+  return p.length === 4 ? `${dayLabel(p[2])} ${p[3]}:00` : dayLabel(p[2]);
+}
+
+// ================= zone editor =================
+const ZW = 32, ZH = 24;
+let zCam = null, zMask = [], zChanged = [], zTimer = null, zPaint = null;
+const hexToBits = hex => { const b = []; for (let i = 0; i < ZW * ZH; i++) b.push((parseInt(hex.substr((i >> 3) * 2, 2), 16) >> (i & 7)) & 1); return b; };
+const bitsToHex = bits => { let h = ''; for (let i = 0; i < bits.length / 8; i++) { let v = 0; for (let j = 0; j < 8; j++) v |= bits[i * 8 + j] << j; h += v.toString(16).padStart(2, '0'); } return h; };
+async function openZones(id) {
+  zCam = id;
+  $('#zTitle').textContent = `Detection zones · ${cam(id)?.name || id}`;
+  $('#zImg').src = streamSrc(id);
+  $('#zoneModal').hidden = false;
+  try { const m = await api(`/api/cameras/${enc(id)}/motion`); zMask = hexToBits(m.mask); zChanged = hexToBits(m.changed); }
+  catch { toast('Camera did not respond'); zMask = Array(ZW * ZH).fill(1); }
+  drawZones();
+  clearInterval(zTimer);
+  zTimer = setInterval(async () => {
+    try { zChanged = hexToBits((await api(`/api/cameras/${enc(zCam)}/motion`)).changed); drawZones(); } catch {}
+  }, 500);
+}
+function closeZones() { $('#zoneModal').hidden = true; $('#zImg').src = ''; clearInterval(zTimer); zCam = null; }
+function drawZones() {
+  const cv = $('#zCan'), r = cv.getBoundingClientRect();
+  cv.width = r.width * devicePixelRatio; cv.height = r.height * devicePixelRatio;
+  const g = cv.getContext('2d'), cw = cv.width / ZW, ch = cv.height / ZH;
+  for (let i = 0; i < ZW * ZH; i++) {
+    const x = (i % ZW) * cw, y = Math.floor(i / ZW) * ch;
+    if (!zMask[i]) { g.fillStyle = 'rgba(0,0,0,.62)'; g.fillRect(x, y, cw, ch); }
+    else if (zChanged[i]) { g.fillStyle = 'rgba(229,72,77,.5)'; g.fillRect(x, y, cw, ch); }
+  }
+  g.strokeStyle = 'rgba(255,255,255,.12)'; g.lineWidth = 1;
+  for (let x = 1; x < ZW; x++) { g.beginPath(); g.moveTo(x * cw, 0); g.lineTo(x * cw, cv.height); g.stroke(); }
+  for (let y = 1; y < ZH; y++) { g.beginPath(); g.moveTo(0, y * ch); g.lineTo(cv.width, y * ch); g.stroke(); }
+}
+function zCell(e) {
+  const r = $('#zCan').getBoundingClientRect();
+  const x = Math.floor((e.clientX - r.left) / r.width * ZW), y = Math.floor((e.clientY - r.top) / r.height * ZH);
+  return x >= 0 && x < ZW && y >= 0 && y < ZH ? y * ZW + x : -1;
+}
+$('#zCan').onpointerdown = e => {
+  const i = zCell(e); if (i < 0) return;
+  $('#zCan').setPointerCapture(e.pointerId);
+  zPaint = zMask[i] ? 0 : 1; zMask[i] = zPaint; drawZones();
+};
+$('#zCan').onpointermove = e => { if (zPaint === null) return; const i = zCell(e); if (i >= 0 && zMask[i] !== zPaint) { zMask[i] = zPaint; drawZones(); } };
+$('#zCan').onpointerup = $('#zCan').onpointercancel = () => { zPaint = null; };
+$('#zAll').onclick = () => { zMask.fill(1); drawZones(); };
+$('#zNone').onclick = () => { zMask.fill(0); drawZones(); };
+$('#zInvert').onclick = () => { zMask = zMask.map(v => 1 - v); drawZones(); };
+$('#zCancel').onclick = closeZones;
+$('#zSave').onclick = async () => {
+  const st = await control({ mask: bitsToHex(zMask) }, zCam);
+  if (st) { toast(`Zones saved · watching ${Math.round(zMask.reduce((a, b) => a + b, 0) / zMask.length * 100)}% of the picture`); closeZones(); }
+};
+window.addEventListener('resize', () => { if (!$('#zoneModal').hidden) drawZones(); });
+
+// ================= motion events =================
+let evTimer = null;
+async function openEvents() {
+  $('#evModal').hidden = false;
+  const sel = $('#evCam'), cur = sel.value;
+  sel.innerHTML = '<option value="">All cameras</option>' + cams.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
+  sel.value = cur;
+  try { $('#evNotify').checked = (await api('/api/settings')).notify; } catch {}
+  loadEvents();
+  clearInterval(evTimer); evTimer = setInterval(loadEvents, 4000);
+}
+function closeEvents() { $('#evModal').hidden = true; clearInterval(evTimer); }
+async function loadEvents() {
+  let ev = [];
+  try { ev = await api(`/api/events?limit=300${$('#evCam').value ? '&cam=' + enc($('#evCam').value) : ''}`); } catch { return; }
+  const today = ev.filter(e => Date.now() / 1000 - e.start < 86400).length;
+  $('#evSummary').textContent = `${ev.length} events · ${today} in the last 24 h`;
+  $('#evList').innerHTML = ev.length ? ev.map(e => `
+    <div class="ev" data-snap="${esc(e.snap || '')}">
+      ${e.snap ? `<img loading="lazy" src="/events/${enc(e.snap)}" alt="">` : '<img alt="">'}
+      <div><b>${esc(e.name)}</b>${fmtTime(e.start)} · ${e.open ? '<span style="color:var(--warn)">happening now</span>' : fmtDur(e.end - e.start)}</div>
+    </div>`).join('') : '<div class="note pad">No motion events yet.</div>';
+  $('#evList').querySelectorAll('.ev').forEach(el => el.onclick = () => {
+    if (!el.dataset.snap) return;
+    $('#lightImg').src = `/events/${enc(el.dataset.snap)}`; $('#lightbox').hidden = false;
+  });
+}
+$('#lightbox').onclick = () => $('#lightbox').hidden = true;
+$('#eventsBtn').onclick = openEvents;
+$('#evClose').onclick = closeEvents;
+$('#evCam').onchange = loadEvents;
+$('#evNotify').onchange = async () => {
+  await post('/api/settings', { notify: $('#evNotify').checked }).catch(() => {});
+  toast($('#evNotify').checked ? 'You’ll get a pop-up on this PC when motion starts (at most once a minute per camera).' : 'Notifications off');
+};
+$('#evTest').onclick = () => post('/api/settings', { test: true }).then(() => toast('Test notification sent')).catch(() => toast('Failed'));
+$('#evClear').onclick = async () => {
+  if (!confirm('Delete all motion events and their snapshots? (Recordings on the SD cards are not affected.)')) return;
+  await api('/api/events', { method: 'DELETE' }).catch(() => {});
+  loadEvents(); updateEventCount();
+};
+async function updateEventCount() {
+  try {
+    const ev = await api('/api/events?limit=500');
+    const n = ev.filter(e => Date.now() / 1000 - e.start < 86400).length;
+    $('#evCount').textContent = n;
+    $('#evCount').classList.toggle('hot', ev.some(e => e.open));
+    $('#eventsBtn').title = `${n} motion events in the last 24 hours`;
+  } catch {}
+}
+
+// ================= firmware =================
+let fwTimer = null;
+function updateFwButton() {
+  const outdated = cams.filter(c => fwInfo?.source && c.status?.version && c.status.version !== fwInfo.source).length;
+  $('#fwBtn').classList.toggle('attn', outdated > 0);
+  $('#fwBtn').textContent = outdated ? `Update ${outdated} camera${outdated > 1 ? 's' : ''}` : 'Firmware';
+}
+async function loadFw() {
+  try { fwInfo = await api('/api/firmware'); } catch { return; }
+  updateFwButton();
+  if ($('#fwModal').hidden) return;
+  $('#fwSource').textContent = fwInfo.source ? `Latest: v${fwInfo.source}` : 'Firmware source not found';
+  $('#fwTable').innerHTML = fwInfo.cameras.map(c => `<tr>
+    <td>${esc(c.name)}</td><td>${esc(c.host)}</td><td>${c.version ? 'v' + esc(c.version) : '?'}</td>
+    <td>${!c.online ? '<span class="meta">offline</span>' : c.outdated ? '<span style="color:var(--warn)">update available</span>' : '<span style="color:var(--ok)">up to date</span>'}</td></tr>`).join('');
+  const outdated = fwInfo.cameras.filter(c => c.outdated && c.online).length;
+  $('#fwUpdate').disabled = fwInfo.running || !outdated;
+  $('#fwUpdate').textContent = fwInfo.running ? 'Updating…' : outdated ? `Update ${outdated} camera${outdated > 1 ? 's' : ''}` : 'All up to date';
+  $('#fwAll').disabled = fwInfo.running;
+  const log = $('#fwLog');
+  log.hidden = !fwInfo.log.length;
+  log.textContent = fwInfo.log.join('\n') + (fwInfo.exit != null && !fwInfo.running ? `\n${fwInfo.exit === 0 ? '✓ Done' : '✗ Finished with errors'}` : '');
+  log.scrollTop = log.scrollHeight;
+}
+async function startFw(all) {
+  try {
+    const r = await post('/api/firmware/update', { all });
+    toast(r.started ? `Building firmware and updating ${r.hosts.length} camera(s)…` : r.reason);
+  } catch (e) { toast('Could not start: ' + e.message); }
+  loadFw();
+}
+$('#fwBtn').onclick = () => { $('#fwModal').hidden = false; loadFw(); clearInterval(fwTimer); fwTimer = setInterval(loadFw, 2000); };
+function closeFw() { $('#fwModal').hidden = true; clearInterval(fwTimer); }
+$('#fwClose').onclick = closeFw;
+$('#fwUpdate').onclick = () => startFw(false);
+$('#fwAll').onclick = () => { if (confirm('Rebuild the firmware and reinstall it on every online camera?')) startFw(true); };
+
+refresh();
+setInterval(refresh, 2000);
+loadFw(); setInterval(loadFw, 30000);
+updateEventCount(); setInterval(updateEventCount, 10000);
+</script>
+</body>
+</html>

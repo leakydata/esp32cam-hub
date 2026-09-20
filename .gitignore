@@ -1,0 +1,37 @@
+# ---- secrets: WiFi credentials live here, never commit them ----
+secrets.h
+**/secrets.h
+!secrets.h.example
+!**/secrets.h.example
+
+# ---- captured footage and anything identifying a particular install ----
+# motion snapshots, the event log, exported MP4s, per-camera names and prefs
+camhub/events/
+camhub/events.json
+camhub/videos/
+camhub/cameras.json
+
+# ---- build output ----
+build/
+build-camnode/
+camnode/build/
+camnode-idf/build/
+camnode-idf/managed_components/
+camnode-idf/sdkconfig
+camnode-idf/sdkconfig.old
+camnode-idf/dependencies.lock
+
+# ---- python ----
+.venv/
+__pycache__/
+*.py[cod]
+
+# ---- editors / agents / OS ----
+.claude/
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# ---- third-party project kept locally for reference, not ours to redistribute ----
+ESP32-CAM_MJPEG2SD/
