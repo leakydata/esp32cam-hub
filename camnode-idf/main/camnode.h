@@ -23,7 +23,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
-#define FW_VERSION "2.0.0"
+#define FW_VERSION "2.0.1"
 
 #ifndef TZ_INFO
 #define TZ_INFO "EST5EDT,M3.2.0,M11.1.0"  // POSIX TZ used for clip names
@@ -121,6 +121,12 @@ void abortSegment();
 void stopRecording();
 
 // ---- recorder / motion / time-lapse ----
+// Task handles, so an OTA can stop everything before writing flash: erasing disables
+// the flash cache, and a camera DMA or a task still running from flash while that
+// happens trips the interrupt watchdog ("rst:0x8 (TG1WDT_SYS_RESET)").
+extern TaskHandle_t hCapture, hRecorder, hMotion, hTimelapse;
+void quiesceForOta();
+
 void recorderTask(void *);
 void motionTask(void *);
 void timelapseTask(void *);

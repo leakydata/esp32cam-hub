@@ -24,7 +24,7 @@ fi
 fail=0
 for ip in "${ips[@]}"; do
   echo "== $ip"
-  code=$(curl -s -m 300 -o /dev/null -w '%{http_code}' \
+  code=$(curl -s -m 300 -o /dev/null -w '%{http_code}' -H "Expect:" \
            -X POST --data-binary "@$BIN" "http://$ip/update" 2>/dev/null)
   if [ "$code" != "200" ]; then
     # 404 means it is still on the Arduino firmware and has no /update endpoint

@@ -31,15 +31,21 @@ CONFIG_FATFS_SECTOR_512=y
 # HTTP: three servers (80 api, 81 stream, 82 files) and long MJPEG responses
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
 CONFIG_HTTPD_MAX_URI_LEN=512
-CONFIG_LWIP_MAX_SOCKETS=16
+# Three HTTP servers, each with a listen socket, a control socket and its open
+# connections, plus mDNS and SNTP, come to exactly 16. At the default the last server
+# to start could never accept: "httpd_accept_conn: error in accept (128)". 24 leaves
+# room for a second viewer alongside the hub.
+CONFIG_LWIP_MAX_SOCKETS=24
 
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 CONFIG_FREERTOS_HZ=1000
 CONFIG_ESP32_DEFAULT_CPU_FREQ_240=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
-# brownout at the default level trips on camera TX bursts with weak USB power
-CONFIG_ESP_BROWNOUT_DET_LVL_SEL_7=y
+# Brownout detection is left at the IDF default, which on the ESP32 is level 0 (~2.43V,
+# the most tolerant). Do not "raise" it: the ESP32 numbers levels the opposite way to the
+# S3/C3, where 7 is the lowest. Setting level 7 here put a board into a reset loop the
+# instant phy_init powered the radio.
 
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
 
@@ -51,11 +57,6 @@ CONFIG_COMPILER_OPTIMIZATION_PERF=y
 # Arduino build never used it here, so there is no evidence it is safe on these boards.
 CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 
-# MJPEG streaming is one big unidirectional TCP flow per viewer. The stock 5760-byte
-# window caps a single stream well below what the radio can carry; 32KB lets a frame
-# go out without stalling on ACKs. Buffers can live in PSRAM (SPIRAM_TRY_ALLOCATE_WIFI_LWIP).
-CONFIG_LWIP_TCP_SND_BUF_DEFAULT=32768
-CONFIG_LWIP_TCP_WND_DEFAULT=32768
-CONFIG_LWIP_TCP_RECVMBOX_SIZE=16
-CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=24
-CONFIG_ESP_WIFI_TX_BA_WIN=12
+# TCP window, WiFi TX buffers and the block-ack window are left at IDF defaults. Larger
+# values were tried on the reasoning that MJPEG is one big unidirectional flow, but that
+# was never benchmarked, and they cost RAM. Measure before changing them.

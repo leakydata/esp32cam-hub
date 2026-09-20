@@ -201,18 +201,33 @@ static esp_err_t updateHandler(httpd_req_t *req) {
     httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "no image");
     return ESP_FAIL;
   }
-  stopRecording();
+  quiesceForOta();
   esp_ota_handle_t ota = 0;
-  if (esp_ota_begin(target, req->content_len, &ota) != ESP_OK) {
+  // OTA_WITH_SEQUENTIAL_WRITES erases the partition a block at a time as data arrives.
+  // Passing the image size instead makes esp_ota_begin() erase all 1.875MB in one
+  // blocking call, which starves the task watchdog and resets the chip mid-upload
+  // ("rst:0x8 (TG1WDT_SYS_RESET)").
+  if (esp_ota_begin(target, OTA_WITH_SEQUENTIAL_WRITES, &ota) != ESP_OK) {
     pauseRec = false;
     httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "ota begin failed");
     return ESP_FAIL;
   }
-  char *buf = (char *)malloc(4096);
+  // Must be internal RAM. On the ESP32 PSRAM is reached through the same cache as
+  // flash, so while esp_ota_write() has the cache off, touching a PSRAM buffer stalls
+  // the CPU -- and SPIRAM_MALLOC_ALWAYSINTERNAL=4096 would put a plain malloc(4096)
+  // exactly there.
+  char *buf = (char *)heap_caps_malloc(4096, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  if (!buf) {
+    esp_ota_abort(ota);
+    pauseRec = false;
+    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no memory");
+    return ESP_FAIL;
+  }
   int remaining = req->content_len;
   esp_err_t err = ESP_OK;
   while (remaining > 0 && err == ESP_OK) {
     int got = httpd_req_recv(req, buf, remaining < 4096 ? remaining : 4096);
+    if (got == HTTPD_SOCK_ERR_TIMEOUT) continue;  // slow link, not a failure
     if (got <= 0) { err = ESP_FAIL; break; }
     err = esp_ota_write(ota, buf, got);
     remaining -= got;

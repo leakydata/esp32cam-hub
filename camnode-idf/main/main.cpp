@@ -16,6 +16,7 @@
 
 static const char *TAG = "camnode";
 static httpd_handle_t httpd80 = NULL, httpd81 = NULL, httpd82 = NULL;
+TaskHandle_t hCapture = NULL, hRecorder = NULL, hMotion = NULL, hTimelapse = NULL;
 static EventGroupHandle_t wifiEvents;
 #define WIFI_GOT_IP BIT0
 
@@ -92,12 +93,28 @@ static httpd_handle_t startHttpd(uint16_t port, uint16_t ctrlPort, int sockets,
   config.lru_purge_enable = true;
   config.stack_size = 6144;
   config.uri_match_fn = httpd_uri_match_wildcard;
+  config.recv_wait_timeout = 20;  // a 1.1MB OTA upload over a weak link stalls at 5s
+  config.send_wait_timeout = 20;
   if (httpd_start(&h, &config) != ESP_OK) {
     printf("HTTP server on port %u failed to start\n", port);
     return NULL;
   }
   for (int i = 0; i < n; i++) httpd_register_uri_handler(h, &uris[i]);
   return h;
+}
+
+// Close the clip, stop the workers and shut the camera down. Flash erase stops the
+// cache; anything still executing from flash or driving DMA through it at that moment
+// takes the whole chip down with the interrupt watchdog.
+void quiesceForOta() {
+  stopRecording();
+  if (hTimelapse) vTaskSuspend(hTimelapse);
+  if (hMotion) vTaskSuspend(hMotion);
+  if (hRecorder) vTaskSuspend(hRecorder);
+  if (hCapture) vTaskSuspend(hCapture);
+  delayMs(100);
+  if (cameraOk) esp_camera_deinit();  // stops the I2S/DMA engine feeding frames
+  delayMs(50);
 }
 
 void startServers() {
@@ -142,7 +159,7 @@ extern "C" void app_main(void) {
   // Without a working camera the rest still starts, so the board stays reachable
   // over WiFi (status, OTA) instead of rebooting in a loop.
   if (initCamera()) {
-    xTaskCreatePinnedToCore(captureTask, "capture", 4096, NULL, 5, NULL, 1);
+    xTaskCreatePinnedToCore(captureTask, "capture", 4096, NULL, 5, &hCapture, 1);
   } else {
     loadSettings(NULL);  // settings still need to exist for /status and /control
   }
@@ -155,9 +172,9 @@ extern "C" void app_main(void) {
   esp_netif_sntp_init(&sntp);
 
   startServers();
-  xTaskCreatePinnedToCore(recorderTask, "recorder", 8192, NULL, 3, NULL, 0);
-  xTaskCreatePinnedToCore(motionTask, "motion", 8192, NULL, 2, NULL, 0);
-  xTaskCreatePinnedToCore(timelapseTask, "timelapse", 6144, NULL, 2, NULL, 0);
+  xTaskCreatePinnedToCore(recorderTask, "recorder", 8192, NULL, 3, &hRecorder, 0);
+  xTaskCreatePinnedToCore(motionTask, "motion", 8192, NULL, 2, &hMotion, 0);
+  xTaskCreatePinnedToCore(timelapseTask, "timelapse", 6144, NULL, 2, &hTimelapse, 0);
   startMdns();
 
   esp_netif_ip_info_t ip = {};
