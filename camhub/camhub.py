@@ -213,6 +213,13 @@ class Hub:
         """Keep one upstream MJPEG connection per camera, parse frames, notify viewers."""
         backoff = 1
         while cam.id in self.cameras:
+            # Four MJPEG streams saturate a 2.4GHz channel: during a firmware push the
+            # cameras saw 75% packet loss and a 1.1MB upload could not get through, but
+            # 0% with the streams stopped. Stand back while an update is running.
+            if fw_state.get("running"):
+                cam.online = False
+                await asyncio.sleep(2)
+                continue
             try:
                 timeout = aiohttp.ClientTimeout(total=None, connect=5, sock_read=10)
                 async with self.session.get(cam.stream_url, timeout=timeout) as resp:
@@ -796,6 +803,7 @@ async def api_firmware(request):
 
 
 async def run_update(hosts: list[str]):
+    # Streams pause while this is set (see Hub.pull): the upload needs the air.
     fw_state.update(running=True, log=[], started=time.time(), exit=None)
     env = {**os.environ, "PATH": f"{Path.home() / '.local/bin'}:{os.environ.get('PATH', '')}"}
     try:

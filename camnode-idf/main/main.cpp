@@ -117,6 +117,17 @@ void quiesceForOta() {
   delayMs(50);
 }
 
+// Undo quiesceForOta() when an update does not go through, so a failed upload does not
+// leave the camera dead until someone power-cycles it.
+void resumeAfterOta() {
+  if (cameraOk) initCamera();
+  if (hCapture) vTaskResume(hCapture);
+  if (hRecorder) vTaskResume(hRecorder);
+  if (hMotion) vTaskResume(hMotion);
+  if (hTimelapse) vTaskResume(hTimelapse);
+  pauseRec = false;
+}
+
 void startServers() {
   int nApi, nStream, nFiles;
   const httpd_uri_t *api = apiUris(&nApi);
@@ -155,16 +166,32 @@ extern "C" void app_main(void) {
   snprintf(hostName, sizeof(hostName), "espcam-%02x%02x%02x", mac[3], mac[4], mac[5]);
 
   sdLock = xSemaphoreCreateRecursiveMutex();
+  loadSettings(NULL);  // values only; the sensor is not up yet. connectWiFi needs S_RADIO.
+
+  connectWiFi();
+
+  // Confirm the image the moment WiFi is up and BEFORE the camera is initialised.
+  // WiFi working is what we actually want to prove, and this is the last point at
+  // which nothing is touching PSRAM. The call writes otadata, and on the ESP32 a
+  // flash write disables the cache that PSRAM also sits behind -- the camera's I2S
+  // DMA keeps filling PSRAM in hardware even with its task suspended, so confirming
+  // after esp_camera_init() takes the board down (TG1WDT, then LoadProhibited) and
+  // rolls back a perfectly good image.
+  {
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    esp_ota_img_states_t state;
+    if (esp_ota_get_state_partition(running, &state) == ESP_OK &&
+        state == ESP_OTA_IMG_PENDING_VERIFY) {
+      esp_ota_mark_app_valid_cancel_rollback();
+      printf("Update confirmed, running from %s\n", running->label);
+    }
+  }
 
   // Without a working camera the rest still starts, so the board stays reachable
   // over WiFi (status, OTA) instead of rebooting in a loop.
   if (initCamera()) {
     xTaskCreatePinnedToCore(captureTask, "capture", 4096, NULL, 5, &hCapture, 1);
-  } else {
-    loadSettings(NULL);  // settings still need to exist for /status and /control
   }
-
-  connectWiFi();
 
   setenv("TZ", TZ_INFO, 1);
   tzset();
@@ -181,14 +208,4 @@ extern "C" void app_main(void) {
   esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"), &ip);
   printf("Ready: http://%s.local/  http://" IPSTR "/\n", hostName, IP2STR(&ip.ip));
 
-  // We got WiFi, the servers are listening and the tasks are up: this image works.
-  // Until this call the bootloader holds the update pending, and a reset would go back
-  // to the previous slot -- so a bad OTA can never leave a camera unreachable.
-  const esp_partition_t *running = esp_ota_get_running_partition();
-  esp_ota_img_states_t state;
-  if (esp_ota_get_state_partition(running, &state) == ESP_OK &&
-      state == ESP_OTA_IMG_PENDING_VERIFY) {
-    esp_ota_mark_app_valid_cancel_rollback();
-    printf("Update confirmed, running from %s\n", running->label);
-  }
 }

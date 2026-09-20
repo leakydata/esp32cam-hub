@@ -14,6 +14,19 @@ BIN=build/camnode.bin
 idf.py build | tail -1 || exit 1
 [ -f "$BIN" ] || { echo "no firmware at $BIN"; exit 1; }
 
+# camhub holds a live MJPEG stream to every camera, and four of those saturate a
+# 2.4GHz channel: measured 75% packet loss during an upload with it running, 0% with it
+# stopped. Pause it for the duration. (The hub's own Firmware button pauses its streams
+# by itself; this is for running the script by hand.)
+HUB_STOPPED=0
+if systemctl --user is-active --quiet camhub 2>/dev/null; then
+  echo "pausing camhub so the upload has the air"
+  systemctl --user stop camhub && HUB_STOPPED=1
+  sleep 3
+fi
+restore_hub() { [ "$HUB_STOPPED" = 1 ] && systemctl --user start camhub && echo "camhub restarted"; }
+trap restore_hub EXIT
+
 ips=("$@")
 if [ ${#ips[@]} -eq 0 ]; then
   mapfile -t ips < <(avahi-browse -rtp _espcam._tcp 2>/dev/null |

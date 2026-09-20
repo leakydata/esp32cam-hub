@@ -3,6 +3,7 @@
 // time-lapse all copy from there, so recording doesn't halve the live frame rate.
 #include "camnode.h"
 
+#include "driver/gpio.h"
 #include "driver/ledc.h"
 #include "esp_log.h"
 
@@ -39,11 +40,33 @@ static SemaphoreHandle_t frameLock;
 #define LED_CHANNEL LEDC_CHANNEL_2
 #define LED_TIMER LEDC_TIMER_2
 static bool ledReady = false;
+static void initLed();
 
 void setLedDuty(int duty) {
   if (!ledReady || ledPin < 0) return;
   ledc_set_duty(LEDC_LOW_SPEED_MODE, LED_CHANNEL, duty);
   ledc_update_duty(LEDC_LOW_SPEED_MODE, LED_CHANNEL);
+}
+
+// The AI-Thinker board has a second, small red LED on GPIO33, active low. Nothing in
+// this firmware uses it, and an unconfigured pin floats and flickers, so drive it high
+// (off) once at startup.
+#define AI_THINKER_RED_LED 33
+
+static void initStatusLed() {
+  if (boardIdx != 0) return;  // GPIO33 is only the status LED on AI_THINKER
+  gpio_config_t c = {};
+  c.pin_bit_mask = 1ULL << AI_THINKER_RED_LED;
+  c.mode = GPIO_MODE_OUTPUT;
+  gpio_config(&c);
+  gpio_set_level((gpio_num_t)AI_THINKER_RED_LED, 1);  // active low: 1 = off
+}
+
+// Re-assert the flash LED duty after the card mounts. Deliberately does not
+// gpio_reset_pin(): GPIO4 doubles as SD_MMC D1, and reclaiming it from the SDMMC
+// peripheral mid-mount is not worth the risk of taking the app down.
+void reparkLed() {
+  setLedDuty(values[S_LED]);
 }
 
 static void initLed() {
@@ -166,6 +189,7 @@ bool initCamera() {
   }
   printf("Camera: %s board, sensor 0x%04x\n", BOARDS[boardIdx].name, sensorPid);
   initLed();
+  initStatusLed();
   loadSettings(esp_camera_sensor_get());
   return true;
 }

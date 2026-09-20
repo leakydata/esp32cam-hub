@@ -208,7 +208,7 @@ static esp_err_t updateHandler(httpd_req_t *req) {
   // blocking call, which starves the task watchdog and resets the chip mid-upload
   // ("rst:0x8 (TG1WDT_SYS_RESET)").
   if (esp_ota_begin(target, OTA_WITH_SEQUENTIAL_WRITES, &ota) != ESP_OK) {
-    pauseRec = false;
+    resumeAfterOta();
     httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "ota begin failed");
     return ESP_FAIL;
   }
@@ -219,7 +219,7 @@ static esp_err_t updateHandler(httpd_req_t *req) {
   char *buf = (char *)heap_caps_malloc(4096, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
   if (!buf) {
     esp_ota_abort(ota);
-    pauseRec = false;
+    resumeAfterOta();
     httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no memory");
     return ESP_FAIL;
   }
@@ -237,7 +237,7 @@ static esp_err_t updateHandler(httpd_req_t *req) {
   else esp_ota_abort(ota);
   if (err == ESP_OK) err = esp_ota_set_boot_partition(target);
   if (err != ESP_OK) {
-    pauseRec = false;
+    resumeAfterOta();
     httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "ota write failed");
     return ESP_FAIL;
   }

@@ -23,7 +23,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
-#define FW_VERSION "2.0.1"
+#define FW_VERSION "2.0.8"
 
 #ifndef TZ_INFO
 #define TZ_INFO "EST5EDT,M3.2.0,M11.1.0"  // POSIX TZ used for clip names
@@ -90,6 +90,7 @@ void captureTask(void *);
 size_t copyFrame(uint8_t *dst, size_t cap, uint32_t *seq, uint16_t *w = NULL, uint16_t *h = NULL);
 uint8_t *dupFrame(size_t *len);
 void setLedDuty(int duty);
+void reparkLed();
 
 // ---- SD card ----
 extern volatile bool sdMounted;
@@ -126,6 +127,7 @@ void stopRecording();
 // happens trips the interrupt watchdog ("rst:0x8 (TG1WDT_SYS_RESET)").
 extern TaskHandle_t hCapture, hRecorder, hMotion, hTimelapse;
 void quiesceForOta();
+void resumeAfterOta();
 
 void recorderTask(void *);
 void motionTask(void *);

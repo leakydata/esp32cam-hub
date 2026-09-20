@@ -42,7 +42,9 @@ bool mountSd() {
   host.flags = SDMMC_HOST_FLAG_1BIT;  // 1-bit leaves GPIO4 (flash LED) and 12/13 free
   sdmmc_slot_config_t slot = SDMMC_SLOT_CONFIG_DEFAULT();
   slot.width = 1;
-  slot.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
+  // No SDMMC_SLOT_FLAG_INTERNAL_PULLUP: in 1-bit mode only CLK, CMD and D0 are used,
+  // and enabling the peripheral's pull-ups also touches D1 -- which on this board is
+  // GPIO4, the white flash LED.
 
   esp_vfs_fat_sdmmc_mount_config_t cfg = {};
   cfg.format_if_mount_failed = false;
@@ -52,6 +54,7 @@ bool mountSd() {
   // without reformatting -- the main reason this firmware left the Arduino core.
   if (esp_vfs_fat_sdmmc_mount(SD_MOUNT, &host, &slot, &cfg, &card) != ESP_OK) return false;
   sdMounted = true;
+  reparkLed();  // mounting can hand GPIO4 (= SD D1 = flash LED) to the SDMMC peripheral
   refreshSdUsage();
   printf("SD card mounted: %lu MB, %lu MB used\n", (unsigned long)sdTotalMB, (unsigned long)sdUsedMB);
   return true;
