@@ -16,7 +16,9 @@ means flashing it and powering it on; nothing to configure on the hub.
 
 ## What it does
 
-- **Live view** of every camera on one page, plus a full-screen wall view.
+- **Live view** of every camera on one page, plus a full-screen wall view. Only tiles
+  actually on screen are streamed -- a shared 2.4GHz channel will not carry five
+  continuous MJPEG streams, so cameras you are not looking at cost nothing.
 - **Auto-discovery** via mDNS (`_espcam._tcp`). Cameras are never configured by IP.
 - **Per-camera settings** from the browser: name, resolution, quality, brightness,
   contrast, saturation, white balance, exposure, gain, flip/mirror, flash LED, and a
@@ -186,6 +188,12 @@ motherboard USB port or a proper charger, not a keyboard hub.
 
 **2.4GHz only.** The ESP32 has no 5GHz radio. If your SSID is shared across both bands
 this usually still works, but a 5GHz-only SSID will never connect.
+
+**Frame rates drop as you add cameras.** Several simultaneous streams saturate one
+2.4GHz channel; five at once starved two cameras to under 4 fps here. The hub only
+streams visible tiles for this reason. If it still bites, lower `framesize` on the
+cameras you do not need at full speed, or put the hub's PC on 5GHz so it is not
+competing with the cameras for airtime.
 
 **Cameras do not appear in the hub.** They are found by mDNS, so the PC and the cameras
 must be on the same network segment. If your PC is on ethernet and the cameras are on
