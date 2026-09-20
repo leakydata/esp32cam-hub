@@ -491,6 +491,36 @@ function setRotation(view, deg) {
   view.classList.toggle('sideways', deg === 90 || deg === 270);
 }
 const streamSrc = id => `/cam/${enc(id)}/stream`;
+
+// Only stream tiles that are actually on screen. The hub holds one upstream connection
+// per camera it is pulling, and every one of those costs airtime on a shared 2.4GHz
+// channel: with five cameras streaming at once two were starved to 0.3 and 3.7 fps.
+// A tile scrolled out of view, or a hidden tab, now costs nothing.
+function attachStream(img, id) {
+  if (img.dataset.streaming === '1') return;
+  img.dataset.streaming = '1';
+  img.src = streamSrc(id) + '?t=' + Date.now();
+}
+function detachStream(img) {
+  if (img.dataset.streaming !== '1') return;
+  img.dataset.streaming = '0';
+  img.removeAttribute('src');      // closes the connection, so the hub drops the pull
+}
+const tileSeen = new IntersectionObserver(entries => {
+  for (const e of entries) {
+    const img = e.target, id = img.dataset.camId;
+    if (!id) continue;
+    if (e.isIntersecting && !document.hidden) attachStream(img, id);
+    else detachStream(img);
+  }
+}, {rootMargin: '100px'});         // start a moment before it scrolls into view
+
+document.addEventListener('visibilitychange', () => {
+  document.querySelectorAll('img[data-cam-id]').forEach(img => {
+    if (document.hidden) detachStream(img);
+    else if (img.getBoundingClientRect().top < innerHeight + 100) attachStream(img, img.dataset.camId);
+  });
+});
 const snapshot = id => { location.href = `/cam/${enc(id)}/snapshot.jpg?download=1`; };
 const needsSd = st => (st.rec > 0 || st.tl > 0) && st.sd === 0;
 function badgesHtml(c) {
@@ -524,8 +554,12 @@ function makeTile(c) {
   el.querySelector('.snap').onclick = () => snapshot(c.id);
   el.querySelector('.gear').onclick = () => openDrawer(c.id);
   const img = el.querySelector('img');
-  img.src = streamSrc(c.id);
-  img.onerror = () => setTimeout(() => img.src = streamSrc(c.id) + '?t=' + Date.now(), 3000);
+  img.dataset.camId = c.id;
+  img.onerror = () => setTimeout(() => {
+    img.dataset.streaming = '0';
+    if (!document.hidden) attachStream(img, c.id);
+  }, 3000);
+  tileSeen.observe(img);           // attaches the stream once it is on screen
   return el;
 }
 
@@ -594,7 +628,7 @@ function updateFull() {
   $('#fullView .badges').innerHTML = badgesHtml(c);
   setRotation($('#fullView'), c.rotation);
 }
-function closeFull() { $('#full').hidden = true; $('#fullImg').src = ''; fullId = null; }
+function closeFull() { $('#full').hidden = true; $('#fullImg').removeAttribute('src'); fullId = null; }
 $('#fullClose').onclick = closeFull;
 $('#fullSnap').onclick = () => snapshot(fullId);
 $('#fullSettings').onclick = () => openDrawer(fullId);
@@ -1036,7 +1070,7 @@ async function openZones(id) {
     try { zChanged = hexToBits((await api(`/api/cameras/${enc(zCam)}/motion`)).changed); drawZones(); } catch {}
   }, 500);
 }
-function closeZones() { $('#zoneModal').hidden = true; $('#zImg').src = ''; clearInterval(zTimer); zCam = null; }
+function closeZones() { $('#zoneModal').hidden = true; $('#zImg').removeAttribute('src'); clearInterval(zTimer); zCam = null; }
 function drawZones() {
   const cv = $('#zCan'), r = cv.getBoundingClientRect();
   cv.width = r.width * devicePixelRatio; cv.height = r.height * devicePixelRatio;

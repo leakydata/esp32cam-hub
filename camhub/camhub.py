@@ -155,15 +155,19 @@ class Hub:
             cam.status = await r.json(content_type=None)
             cam.stream_port = cam.status.get("stream_port", cam.port)
             cam.files_port = cam.status.get("files_port", 0)
+            cam.online = True
+            cam.last_seen = time.time()
 
     async def poll_status(self, cam: Camera):
+        # This, not the video stream, is what decides whether a camera is online: the
+        # stream only runs while somebody is looking at the camera.
         while cam.id in self.cameras:
             try:
                 await self.refresh_status(cam)
             except asyncio.CancelledError:
                 raise
             except Exception:
-                pass
+                cam.online = False
             await asyncio.sleep(10)
 
     async def poll_motion(self, cam: Camera):
@@ -183,7 +187,7 @@ class Hub:
             cam.motion = m
             now = time.time()
             if m.get("active") and not was:
-                self.motion_started(cam, now)
+                await self.motion_started(cam, now)
             elif m.get("active") and cam.event:
                 cam.event["end"] = now
                 cam.event["peak"] = max(cam.event["peak"], m.get("level", 0))
@@ -192,12 +196,27 @@ class Hub:
                 cam.event = None
                 self.save_events()
 
-    def motion_started(self, cam: Camera, now: float):
+    async def grab_snapshot(self, cam: Camera) -> bytes | None:
+        """A single JPEG for an event. The live stream only runs while someone is
+        watching, so most motion events happen with no recent frame in hand; one
+        /capture costs a fraction of the airtime of holding a stream open."""
+        if cam.frame and time.time() - cam.frame_time < 3:
+            return cam.frame
+        try:
+            async with self.session.get(f"{cam.base}/capture",
+                                        timeout=aiohttp.ClientTimeout(total=6)) as r:
+                r.raise_for_status()
+                return await r.read()
+        except Exception:
+            return None
+
+    async def motion_started(self, cam: Camera, now: float):
         EVENTS_DIR.mkdir(exist_ok=True)
         snap = None
-        if cam.frame:
+        frame = await self.grab_snapshot(cam)
+        if frame:
             snap = f"{cam.id}_{time.strftime('%Y%m%d-%H%M%S', time.localtime(now))}_{uuid.uuid4().hex[:6]}.jpg"
-            (EVENTS_DIR / snap).write_bytes(cam.frame)
+            (EVENTS_DIR / snap).write_bytes(frame)
         cam.event = {"id": uuid.uuid4().hex[:12], "cam": cam.id, "name": cam.status.get("label") or cam.id,
                      "start": now, "end": now, "peak": cam.motion.get("level", 0), "snap": snap}
         self.events.append(cam.event)
@@ -217,8 +236,15 @@ class Hub:
             # cameras saw 75% packet loss and a 1.1MB upload could not get through, but
             # 0% with the streams stopped. Stand back while an update is running.
             if fw_state.get("running"):
-                cam.online = False
                 await asyncio.sleep(2)
+                continue
+            # Only pull while somebody is actually watching. Every open stream costs
+            # airtime on a shared 2.4GHz channel, and with five cameras streaming at
+            # once two of them were starved down to 0.3 and 3.7 fps. Tiles that are
+            # scrolled out of view, or a closed browser tab, cost nothing now.
+            if cam.viewers <= 0:
+                cam.fps = 0.0
+                await asyncio.sleep(0.5)
                 continue
             try:
                 timeout = aiohttp.ClientTimeout(total=None, connect=5, sock_read=10)
@@ -399,13 +425,16 @@ async def api_status(request):
 
 async def snapshot(request):
     cam = hub.cameras.get(request.match_info["id"])
-    if not cam or not cam.frame:
+    if not cam:
+        raise web.HTTPNotFound()
+    frame = await hub.grab_snapshot(cam)  # no live stream unless someone is watching
+    if not frame:
         raise web.HTTPNotFound()
     headers = {"Cache-Control": "no-store"}
     if "download" in request.query:
         name = (cam.status.get("label") or cam.id).replace(" ", "_")
         headers["Content-Disposition"] = f'attachment; filename="{name}_{time.strftime("%Y%m%d-%H%M%S")}.jpg"'
-    return web.Response(body=cam.frame, content_type="image/jpeg", headers=headers)
+    return web.Response(body=frame, content_type="image/jpeg", headers=headers)
 
 
 async def stream(request):
