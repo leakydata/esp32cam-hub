@@ -23,7 +23,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
-#define FW_VERSION "2.0.8"
+#define FW_VERSION "2.0.9"
 
 #ifndef TZ_INFO
 #define TZ_INFO "EST5EDT,M3.2.0,M11.1.0"  // POSIX TZ used for clip names

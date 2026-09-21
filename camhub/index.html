@@ -506,12 +506,19 @@ function detachStream(img) {
   img.dataset.streaming = '0';
   img.removeAttribute('src');      // closes the connection, so the hub drops the pull
 }
+const dropTimers = new WeakMap();
 const tileSeen = new IntersectionObserver(entries => {
   for (const e of entries) {
     const img = e.target, id = img.dataset.camId;
     if (!id) continue;
-    if (e.isIntersecting && !document.hidden) attachStream(img, id);
-    else detachStream(img);
+    clearTimeout(dropTimers.get(img));
+    if (e.isIntersecting && !document.hidden) {
+      attachStream(img, id);
+    } else {
+      // Grace period: a tile being reordered, or scrolled past quickly, should not
+      // cost a reconnect. Only give the stream up if it stays out of view.
+      dropTimers.set(img, setTimeout(() => detachStream(img), 1500));
+    }
   }
 }, {rootMargin: '100px'});         // start a moment before it scrolls into view
 
@@ -572,11 +579,17 @@ function render() {
   document.documentElement.style.setProperty('--wallcols', Math.ceil(Math.sqrt(Math.max(1, cams.filter(c => !c.hidden).length))));
 
   const seen = new Set();
+  let slot = 0;
   for (const c of visible) {
     seen.add(c.id);
     let el = tiles.get(c.id);
     if (!el) { el = makeTile(c); tiles.set(c.id, el); }
-    grid.appendChild(el);
+    // Only touch the DOM when the order actually changed. appendChild() on an element
+    // already in the grid is a remove+insert: it restarts the MJPEG connection and
+    // makes IntersectionObserver fire, so doing it every poll tore the feed down and
+    // rebuilt it twice a second.
+    if (grid.children[slot] !== el) grid.insertBefore(el, grid.children[slot] || null);
+    slot++;
     el.classList.toggle('hiddencam', c.hidden);
     el.classList.toggle('moving', !!(c.online && c.motion?.active));
     el.querySelector('.dot').className = 'dot' + (c.stale ? ' stale' : c.online ? ' on' : '');

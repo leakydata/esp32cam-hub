@@ -12,6 +12,7 @@
 #include <sys/unistd.h>
 
 #include "driver/sdmmc_host.h"
+#include "esp_log.h"
 #include "esp_vfs_fat.h"
 #include "ff.h"
 #include "sdmmc_cmd.h"
@@ -33,7 +34,22 @@ void refreshSdUsage() {
   sdUsedMB = (total - freeB) / 1048576;
 }
 
+// There is no card-detect pin wired on these boards, so the only way to notice a card
+// has been inserted is to try mounting one. The recorder retries every 30s, which is
+// what makes hot-insertion work without a reboot -- but the SDMMC driver logs an error
+// on each probe, which buries real problems. Quiet those two tags; a successful mount
+// still prints, and so does anything that goes wrong afterwards.
+static void quietSdmmcProbeLogs() {
+  static bool done = false;
+  if (done) return;
+  esp_log_level_set("sdmmc_common", ESP_LOG_NONE);
+  esp_log_level_set("vfs_fat_sdmmc", ESP_LOG_NONE);
+  esp_log_level_set("sdmmc_periph", ESP_LOG_NONE);
+  done = true;
+}
+
 bool mountSd() {
+  quietSdmmcProbeLogs();
   sdmmc_host_t host = SDMMC_HOST_DEFAULT();
   // 20MHz. The frame corruption once blamed on 40MHz was really two software bugs (the AVI
   // pad byte counted in the chunk size, and unlocked FatFs listings racing the writer);
@@ -52,7 +68,11 @@ bool mountSd() {
   cfg.allocation_unit_size = 16 * 1024;
   // exFAT is compiled in here (CONFIG_FATFS_FS_EXFAT), so cards over 32GB work
   // without reformatting -- the main reason this firmware left the Arduino core.
-  if (esp_vfs_fat_sdmmc_mount(SD_MOUNT, &host, &slot, &cfg, &card) != ESP_OK) return false;
+  if (esp_vfs_fat_sdmmc_mount(SD_MOUNT, &host, &slot, &cfg, &card) != ESP_OK) {
+    card = NULL;
+    sdmmc_host_deinit();  // otherwise every later probe says "already initialized"
+    return false;
+  }
   sdMounted = true;
   reparkLed();  // mounting can hand GPIO4 (= SD D1 = flash LED) to the SDMMC peripheral
   refreshSdUsage();
