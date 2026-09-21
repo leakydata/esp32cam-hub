@@ -6,8 +6,8 @@
 #   ./flash-usb.sh /dev/ttyUSB0 name the port instead of scanning
 #
 # Writes the bootloader, partition table, OTA data and app -- a complete image, not an
-# OTA into someone else's layout. After this a board takes updates over the air with
-# ./update-all.sh and never needs the cable again.
+# OTA into someone else's layout, and resets the board into it when done. After this a
+# board takes updates over the air with ./update-all.sh and never needs the cable again.
 #
 # Getting a board into download mode: take the SD card OUT (GPIO2 is SD DATA0 and has
 # to be low, or the ROM reports boot:0x0b and refuses), seat it firmly in the adapter,
@@ -35,7 +35,11 @@ idf.py build | tail -1 || exit 1
 # ("Only got 1 byte status response"). 70s for the app is a fair trade for it working.
 flash_one() {
   local p="$1"
-  "$ET" --chip esp32 --port "$p" --baud 115200 --connect-attempts 3 \
+  # --after hard_reset asks the adapter to reset the board into the new firmware.
+  # It does not work on every adapter -- some leave EN held and the board stays
+  # silent -- so treat a clean power cycle off the programmer as the reliable way
+  # to boot a freshly flashed board.
+  "$ET" --chip esp32 --port "$p" --baud 115200 --connect-attempts 3 --after hard_reset \
     write_flash --flash_mode dio --flash_size 4MB --flash_freq 80m \
     0x1000 build/bootloader/bootloader.bin \
     0x8000 build/partition_table/partition-table.bin \
@@ -66,7 +70,10 @@ while :; do
   echo "=== flashing on $target ==="
   if flash_one "$target"; then
     done_any=$((done_any+1))
-    echo "=== flashed OK. Unplug and replug to boot it. ==="
+    echo "=== flashed OK. Unplug it and power it elsewhere to boot it. ==="
+    echo "    (do not plug it back into the programmer: in --all mode it would be"
+    echo "     picked up and flashed again -- this loop cannot tell a fresh board"
+    echo "     from one it just finished.)"
   else
     echo "=== FAILED on $target. Reseat the board firmly and try again --" >&2
     echo "    a loose contact drops the adapter off the USB bus mid-write. ===" >&2
@@ -76,6 +83,7 @@ while :; do
   echo
   echo "Swap in the next board (waiting for this one to be unplugged)..."
   while [ -n "$(ports)" ]; do sleep 1; done
+  sleep 2   # let the port settle before looking again
 done
 
 echo "$done_any board(s) flashed."
